@@ -1,5 +1,15 @@
+# Ignore Python virtual environments
 venv/
+
+# Ignore system & Python cache files
 __pycache__/
 *.py[cod]
 .DS_Store
+
+# Ignore credentials
 credentials.json
+
+# Ignore OS files 
+.DS_Store
+
+.streamlit/secrets.toml
