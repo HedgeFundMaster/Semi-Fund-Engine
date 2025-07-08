@@ -6,7 +6,9 @@ from datetime import datetime, timedelta
 
 # ─── 1) AUTH ───────────────────────────────────────────────────────────────
 SCOPES = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-creds  = Credentials.from_service_account_file("credentials.json", scopes=SCOPES)
+import json
+creds_dict = json.loads(st.secrets["GOOGLE_CREDENTIALS"])
+creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
 client = gspread.authorize(creds)
 
 # ─── 2) PULL & CLEAN ────────────────────────────────────────────────────────
