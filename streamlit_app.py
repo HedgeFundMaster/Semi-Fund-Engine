@@ -171,11 +171,19 @@ df_wide["Peer Avg"] = df_wide.groupby("Date")["Total Return Level"].transform("m
 df_wide["Delta"] = df_wide["Total Return Level"] - df_wide["Peer Avg"]
 
 # ─── 3) SCORE & TIER ────────────────────────────────────────────────────────
+# Convert and filter out future dates
 df_wide["Date"] = pd.to_datetime(df_wide["Date"], errors="coerce")
+today = pd.Timestamp.today()
+df_wide = df_wide[df_wide["Date"] <= today]  # ignore future dates
+
+# Recalculate latest date AFTER filtering
 latest_date = df_wide["Date"].max()
 df_score = df_wide[df_wide["Date"] == latest_date].copy()
+if latest_date is pd.NaT:
+    st.error("No valid dates found in the data!")
+    st.stop()
 
-st.write(f"Latest date: {latest_date}")
+st.write(f"Data filtered for latest date: {latest_date}")
 st.write(f"Funds on latest date: {len(df_score)}")
 
 if len(df_score) == 0:
@@ -185,7 +193,6 @@ if len(df_score) == 0:
 # ✅ Ensure required columns are present
 required_columns = ["Symbol", "Name", "Date", "Total Return Level"]
 missing_cols = [col for col in required_columns if col not in df_wide.columns]
-
 if missing_cols:
     st.error(f"Missing required columns: {missing_cols}")
     st.stop()
@@ -222,4 +229,45 @@ st.dataframe(top10[["Symbol", "Name", "Score", "Tier"]], height=300)
 st.subheader("Full Fund Scores & Metrics")
 st.dataframe(df_score, height=600)
 
+col1, col2 = st.columns(2)
+col1.metric("Latest Date", latest_date.date())
+col2.metric("Funds Scored", len(df_score))
+
+def color_tier(val):
+    if val == "Tier 1":
+        return "background-color: #d4edda"  # green
+    elif val == "Tier 2":
+        return "background-color: #fff3cd"  # yellow
+    elif val == "Tier 3":
+        return "background-color: #f8d7da"  # red
+    return ""
+
+styled_df = df_score.style.applymap(color_tier, subset=["Tier"])
+st.subheader("Full Fund Scores & Metrics")
+st.dataframe(styled_df, height=600)
+
+import matplotlib.pyplot as plt
+
+top_plot = top10.sort_values("Score", ascending=True)
+
+fig, ax = plt.subplots(figsize=(8, 5))
+ax.barh(top_plot["Name"], top_plot["Score"])
+ax.set_xlabel("Composite Score")
+ax.set_title("Top 10 Funds by Score")
+st.pyplot(fig)
+
+with st.sidebar:
+    st.header("📘 Score Breakdown")
+    st.markdown("""
+    - **Total Return Level**: Weighted 3x
+    - **Delta**: Weighted 2x  
+    - **VaR (penalty)**: Weighted -1.5x  
+    - **Std Dev (penalty)**: Weighted -1.2x
+
+    Final score = rewards performance, penalizes risk.
+    """)
+
+selected_tiers = st.multiselect("Select Tiers to Display", options=["Tier 1", "Tier 2", "Tier 3", "No Data"], default=["Tier 1", "Tier 2", "Tier 3"])
+filtered = df_score[df_score["Tier"].isin(selected_tiers)]
+st.dataframe(filtered, height=600)
 
