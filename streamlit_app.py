@@ -56,8 +56,8 @@ def convert_excel_date(date_str):
     try:
         # Try parsing as Excel serial number
         serial_num = int(date_str)
-        # Excel epoch is 1900-01-01, but Excel incorrectly treats 1900 as a leap year
-        # So we use 1899-12-30 as the epoch
+        # Excel epoch is 1900-01-01, but Excel incorrectly treats 1900 as a leap year, so we use 1899-12-30 as the epoch
+    
         excel_epoch = datetime(1899, 12, 30)
         converted_date = excel_epoch + timedelta(days=serial_num)
         return converted_date.strftime("%Y-%m-%d")
@@ -86,8 +86,6 @@ for h in raw_headers:
 
 st.write(f"Clean headers: {clean_headers}")
 
-# Get valid column indices
-# ─── Clean headers & build initial DataFrame ────────────────────────────────
 from datetime import datetime, timedelta
 
 def convert_excel_date(date_str):
