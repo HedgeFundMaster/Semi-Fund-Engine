@@ -225,7 +225,7 @@ st.subheader("Full Fund Scores & Metrics")
 st.dataframe(df_score, height=600)
 
 col1, col2 = st.columns(2)
-col1.metric("Latest Date", latest_date.date())
+col1.metric("Latest Date", latest_date.strftime("%Y-%m-%d"))
 col2.metric("Funds Scored", len(df_score))
 
 def color_tier(val):
