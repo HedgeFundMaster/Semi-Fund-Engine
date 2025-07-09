@@ -139,7 +139,6 @@ if df_long.empty:
     st.error("All dates were in the future or invalid!")
     st.stop()
 
-
 # Convert Value column to numeric
 df_long["Value"] = pd.to_numeric(df_long["Value"], errors="coerce")
 
@@ -175,21 +174,23 @@ df_wide["Peer Avg"] = df_wide.groupby("Date")["Total Return Level"].transform("m
 df_wide["Delta"] = df_wide["Total Return Level"] - df_wide["Peer Avg"]
 
 # ─── 3) SCORE & TIER ────────────────────────────────────────────────────────
-# Convert and filter out future dates
 df_wide["Date"] = pd.to_datetime(df_wide["Date"], errors="coerce")
-today = pd.Timestamp.today()
-df_wide = df_wide[df_wide["Date"] <= today]  # ignore future dates
 
-# Recalculate latest date AFTER filtering
+# ⛔️ DO NOT FILTER OUT "FUTURE" DATES — you *want* to include 2025-12-31
+# today = pd.Timestamp.today()
+# df_wide = df_wide[df_wide["Date"] <= today]
+
+# ✅ Recalculate latest date
 latest_date = df_wide["Date"].max()
 df_score = df_wide[df_wide["Date"] == latest_date].copy()
 
-st.write(f"Data filtered for latest date: {latest_date}")
-st.write(f"Funds on latest date: {len(df_score)}")
+# ✅ UI override for mislabeled placeholder
+if latest_date == pd.to_datetime("2025-12-31"):
+    display_date = "2025-07-07"
+else:
+    display_date = latest_date.date()
 
-if len(df_score) == 0:
-    st.error("No data for the latest date!")
-    st.stop()
+st.markdown(f"**Data as of:** {display_date}")
 
 # ✅ Ensure required columns are present
 required_columns = ["Symbol", "Name", "Date", "Total Return Level"]
