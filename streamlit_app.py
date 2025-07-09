@@ -50,43 +50,7 @@ raw_data = values[header_idx+1:]
 st.write(f"Raw headers: {raw_headers}")
 st.write(f"Data rows: {len(raw_data)}")
 
-# Clean headers and convert Excel serial numbers to dates
-def convert_excel_date(date_str):
-    """Convert Excel serial number to date string"""
-    try:
-        # Try parsing as Excel serial number
-        serial_num = int(date_str)
-        # Excel epoch is 1900-01-01, but Excel incorrectly treats 1900 as a leap year, so we use 1899-12-30 as the epoch
-    
-        excel_epoch = datetime(1899, 12, 30)
-        converted_date = excel_epoch + timedelta(days=serial_num)
-        return converted_date.strftime("%Y-%m-%d")
-    except (ValueError, TypeError):
-        # If it's already a date string, return as is
-        if isinstance(date_str, str) and len(date_str) == 10 and date_str.count('-') == 2:
-            return date_str
-        return None
-
-# Process headers
-clean_headers = []
-for h in raw_headers:
-    h = h.strip()
-    if not h:
-        continue
-    
-    # Convert Excel serial numbers to dates
-    if h.isdigit():
-        converted = convert_excel_date(h)
-        if converted:
-            clean_headers.append(converted)
-        else:
-            clean_headers.append(h)
-    else:
-        clean_headers.append(h)
-
-st.write(f"Clean headers: {clean_headers}")
-
-from datetime import datetime, timedelta
+# Function to convert Excel serial date to 'YYYY-MM-DD'
 
 def convert_excel_date(date_str):
     """Convert Excel serial (e.g. "46022") to 'YYYY-MM-DD', else return None."""
@@ -149,12 +113,9 @@ df_long = df_initial.melt(
 df_long["Value"] = pd.to_numeric(df_long["Value"], errors="coerce")
 df_long = df_long.dropna(subset=["Value"])
 
-# Pivot to wide form
-df_wide = df_long.pivot_table(
-    index=["Symbol","Name","Date"],
-    columns="Metric",
-    values="Value"
-).reset_index()
+# ─── 2.5) DATE FILTERING ────────────────────────────────────────────────────
+# This is where you would filter the dates based on your criteria
+# For example, you might want to filter for the last 12 months or a specific date
 
 # (and then your date-filter, parse, peer avg, scoring, etc.)
 
@@ -210,6 +171,7 @@ df_wide["Peer Avg"] = df_wide.groupby("Date")["Total Return Level"].transform("m
 df_wide["Delta"] = df_wide["Total Return Level"] - df_wide["Peer Avg"]
 
 # ─── 3) SCORE & TIER ────────────────────────────────────────────────────────
+df_wide["Date"] = pd.to_datetime(df_wide["Date"], errors="coerce")
 latest_date = df_wide["Date"].max()
 df_score = df_wide[df_wide["Date"] == latest_date].copy()
 
@@ -218,6 +180,14 @@ st.write(f"Funds on latest date: {len(df_score)}")
 
 if len(df_score) == 0:
     st.error("No data for the latest date!")
+    st.stop()
+
+# ✅ Ensure required columns are present
+required_columns = ["Symbol", "Name", "Date", "Total Return Level"]
+missing_cols = [col for col in required_columns if col not in df_wide.columns]
+
+if missing_cols:
+    st.error(f"Missing required columns: {missing_cols}")
     st.stop()
 
 # Calculate score with available columns
