@@ -131,13 +131,6 @@ if len(df_long) == 0:
 
 # Convert Date column to datetime
 df_long["Date"] = pd.to_datetime(df_long["Date"], format="%Y-%m-%d")
-# Filter out future dates (e.g. accidental 2025+ entries)
-today = pd.Timestamp.today()
-df_long = df_long[df_long["Date"] <= today]
-
-if df_long.empty:
-    st.error("All dates were in the future or invalid!")
-    st.stop()
 
 # Convert Value column to numeric
 df_long["Value"] = pd.to_numeric(df_long["Value"], errors="coerce")
