@@ -114,10 +114,6 @@ df_long["Value"] = pd.to_numeric(df_long["Value"], errors="coerce")
 df_long = df_long.dropna(subset=["Value"])
 
 # ─── 2.5) DATE FILTERING ────────────────────────────────────────────────────
-# This is where you would filter the dates based on your criteria
-# For example, you might want to filter for the last 12 months or a specific date
-
-# (and then your date-filter, parse, peer avg, scoring, etc.)
 
 # Get date columns (exclude the first 3 columns)
 date_cols = [col for col in df_initial.columns if col not in required_cols]
@@ -135,6 +131,14 @@ if len(df_long) == 0:
 
 # Convert Date column to datetime
 df_long["Date"] = pd.to_datetime(df_long["Date"], format="%Y-%m-%d")
+# Filter out future dates (e.g. accidental 2025+ entries)
+today = pd.Timestamp.today()
+df_long = df_long[df_long["Date"] <= today]
+
+if df_long.empty:
+    st.error("All dates were in the future or invalid!")
+    st.stop()
+
 
 # Convert Value column to numeric
 df_long["Value"] = pd.to_numeric(df_long["Value"], errors="coerce")
@@ -179,9 +183,6 @@ df_wide = df_wide[df_wide["Date"] <= today]  # ignore future dates
 # Recalculate latest date AFTER filtering
 latest_date = df_wide["Date"].max()
 df_score = df_wide[df_wide["Date"] == latest_date].copy()
-if latest_date is pd.NaT:
-    st.error("No valid dates found in the data!")
-    st.stop()
 
 st.write(f"Data filtered for latest date: {latest_date}")
 st.write(f"Funds on latest date: {len(df_score)}")
