@@ -165,9 +165,11 @@ df_long = df_long.dropna(subset=["Value"])
 date_cols = [col for col in df_initial.columns if col not in required_cols]
 st.write(f"Date columns found: {date_cols}")
 
-# Filter for valid dates only
-valid_date_pattern = r'^\d{4}-\d{2}-\d{2}$'
-df_long = df_long[df_long["Date"].str.match(valid_date_pattern, na=False)]
+# Convert Date column to datetime (coerce invalids to NaT)
+df_long["Date"] = pd.to_datetime(df_long["Date"], format="%Y-%m-%d", errors="coerce")
+
+# Drop any rows where Date conversion failed
+df_long = df_long[df_long["Date"].notna()]
 
 st.write(f"After date filtering: {len(df_long)} rows")
 
@@ -175,49 +177,24 @@ if len(df_long) == 0:
     st.error("No rows with valid dates found!")
     st.stop()
 
-# Convert Date column to datetime
-df_long["Date"] = pd.to_datetime(df_long["Date"], format="%Y-%m-%d")
-
-# Convert Value column to numeric
+# Convert Value column to numeric and drop NaNs
 df_long["Value"] = pd.to_numeric(df_long["Value"], errors="coerce")
+df_long = df_long.dropna(subset=["Value"])
 
 st.write("After numeric conversion:")
 st.write(f"Non-null values: {df_long['Value'].notna().sum()}")
 st.write(f"Null values: {df_long['Value'].isna().sum()}")
 
-# Check if we have any numeric data
+# Final check
 if df_long["Value"].notna().sum() == 0:
     st.error("No numeric values found after conversion!")
     st.stop()
-
-# Create pivot table
+# Create pivot table AFTER cleaning
 df_wide = df_long.pivot_table(
     index=["Symbol", "Name", "Date"], 
     columns="Metric", 
     values="Value"
 ).reset_index()
-
-st.write("Pivot table result:")
-st.dataframe(df_wide.head())
-
-# Check required columns for calculations
-required_metrics = ["Total Return Level"]
-missing_metrics = [col for col in required_metrics if col not in df_wide.columns]
-if missing_metrics:
-    st.error(f"Missing required metrics: {missing_metrics}")
-    st.write(f"Available metric columns: {[col for col in df_wide.columns if col not in ['Symbol', 'Name', 'Date']]}")
-    st.stop()
-
-# Calculate peer average & delta
-df_wide["Peer Avg"] = df_wide.groupby("Date")["Total Return Level"].transform("mean")
-df_wide["Delta"] = df_wide["Total Return Level"] - df_wide["Peer Avg"]
-
-def compute_score(row, weights):
-    score = 0.0
-    for metric, weights in weights.items():
-        if pd.notna(row.get(metric)):
-            score += row[metric] * weights 
-    return score 
 
 # ─── 3A) ROLLING RETURN METRICS ─────────────────────────────────────────────
 df_wide["Date"] = pd.to_datetime(df_wide["Date"], errors="coerce")
