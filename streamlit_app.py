@@ -4,6 +4,52 @@ import gspread
 from google.oauth2.service_account import Credentials
 from datetime import datetime, timedelta
 
+def score_funds_by_period(df_long, period_years=None):
+    """
+    Scores funds based on Total Return Level over a given period.
+    - If period_years is None → uses all available data (since inception).
+    - If period_years = 1 or 3 → uses trailing returns.
+    """
+    today = pd.Timestamp.today()
+    
+    if period_years:
+        cutoff_date = today - pd.DateOffset(years=period_years)
+        df_filtered = df_long[df_long["Date"] >= cutoff_date].copy()
+    else:
+        df_filtered = df_long.copy()
+
+    # Convert to wide
+    df_temp = df_filtered.pivot_table(index=["Symbol", "Name", "Date"], columns="Metric", values="Value").reset_index()
+
+    if "Total Return Level" not in df_temp.columns:
+        return pd.DataFrame()  # no score possible
+
+    df_temp["Peer Avg"] = df_temp.groupby("Date")["Total Return Level"].transform("mean")
+    df_temp["Delta"] = df_temp["Total Return Level"] - df_temp["Peer Avg"]
+
+    latest_date = df_temp["Date"].max()
+    df_score = df_temp[df_temp["Date"] == latest_date].copy()
+
+    df_score["Score"] = df_score["Total Return Level"] * 3.0 + df_score["Delta"] * 2.0
+
+    if "Daily Value at Risk (VaR) 5% (1Y Lookback)" in df_score.columns:
+        df_score["Score"] -= df_score["Daily Value at Risk (VaR) 5% (1Y Lookback)"] * 1.5
+
+    if "Annualized Standard Deviation of Monthly Returns (1Y Lookback)" in df_score.columns:
+        df_score["Score"] -= df_score["Annualized Standard Deviation of Monthly Returns (1Y Lookback)"] * 1.2
+
+    def tier(score):
+        if pd.isna(score): return "No Data"
+        if score >= 8.5: return "Tier 1"
+        if score >= 6.0: return "Tier 2"
+        return "Tier 3"
+
+    df_score["Tier"] = df_score["Score"].apply(tier)
+    df_score["Period"] = f"{period_years}Y" if period_years else "Since Inception"
+    
+    return df_score
+
+
 # ─── 1) AUTH ───────────────────────────────────────────────────────────────
 SCOPES = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 import json
@@ -220,6 +266,24 @@ st.markdown(f"**Data as of:** {latest_date.date()}")
 
 st.subheader("Top 10 Funds by Composite Score")
 st.dataframe(top10[["Symbol", "Name", "Score", "Tier"]], height=300)
+
+st.subheader("🔄 Multi-Period Scoring")
+
+tabs = st.tabs(["1-Year", "3-Year", "Since Inception"])
+
+periods = [1, 3, None]  # corresponding to tab order
+
+for i, tab in enumerate(tabs):
+    with tab:
+        period = periods[i]
+        result_df = score_funds_by_period(df_long, period)
+        if result_df.empty:
+            st.warning(f"No scoring data available for {period or 'Since Inception'} period.")
+        else:
+            top_n = result_df.sort_values("Score", ascending=False).head(10)
+            st.write(f"**Top 10 Funds – {result_df['Period'].iloc[0]}**")
+            st.dataframe(top_n[["Symbol", "Name", "Score", "Tier"]], height=400)
+
 
 st.subheader("Full Fund Scores & Metrics")
 st.dataframe(df_score, height=600)
