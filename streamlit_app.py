@@ -28,6 +28,10 @@ def score_funds_by_period(df_long, period_years=None):
     df_temp["Delta"] = df_temp["Total Return Level"] - df_temp["Peer Avg"]
 
     latest_date = df_temp["Date"].max()
+
+    # New guard clause
+    if pd.isna(latest_date) or latest_date not in df_temp["Date"].values:
+        return pd.DataFrame()
     df_score = df_temp[df_temp["Date"] == latest_date].copy()
 
     df_score["Score"] = df_score["Total Return Level"] * 3.0 + df_score["Delta"] * 2.0
@@ -165,8 +169,43 @@ df_long = df_long.dropna(subset=["Value"])
 date_cols = [col for col in df_initial.columns if col not in required_cols]
 st.write(f"Date columns found: {date_cols}")
 
-# Convert Date column to datetime (coerce invalids to NaT)
-df_long["Date"] = pd.to_datetime(df_long["Date"], format="%Y-%m-%d", errors="coerce")
+# Debug: Check what's in the Date column before conversion
+st.write("Sample Date values before conversion:")
+st.write(df_long["Date"].head(10).tolist())
+
+# Convert Date column to datetime - handle both Excel serial and YYYY-MM-DD formats
+def parse_date_flexible(date_str):
+    """Parse date from either Excel serial or YYYY-MM-DD format"""
+    if pd.isna(date_str):
+        return pd.NaT
+    
+    # Try Excel serial conversion first
+    try:
+        serial = int(float(date_str))
+        epoch = datetime(1899, 12, 30)
+        return epoch + timedelta(days=serial)
+    except (ValueError, TypeError):
+        pass
+    
+    # Try YYYY-MM-DD format
+    try:
+        return pd.to_datetime(date_str, format="%Y-%m-%d")
+    except:
+        pass
+    
+    # Try general datetime parsing as fallback
+    try:
+        return pd.to_datetime(date_str)
+    except:
+        return pd.NaT
+
+df_long["Date"] = df_long["Date"].apply(parse_date_flexible)
+
+# Debug: Check conversion results
+st.write("Sample Date values after conversion:")
+st.write(df_long["Date"].head(10).tolist())
+st.write(f"Valid dates: {df_long['Date'].notna().sum()}")
+st.write(f"Invalid dates: {df_long['Date'].isna().sum()}")
 
 # Drop any rows where Date conversion failed
 df_long = df_long[df_long["Date"].notna()]
@@ -175,20 +214,23 @@ st.write(f"After date filtering: {len(df_long)} rows")
 
 if len(df_long) == 0:
     st.error("No rows with valid dates found!")
+    st.write("DEBUG: Original date values that failed conversion:")
+    # Re-create df_long to show failed conversions
+    df_debug = df_initial.melt(
+        id_vars=["Symbol","Name","Metric"],
+        var_name="Date",
+        value_name="Value"
+    )
+    st.write(df_debug["Date"].value_counts())
     st.stop()
 
-# Convert Value column to numeric and drop NaNs
-df_long["Value"] = pd.to_numeric(df_long["Value"], errors="coerce")
-df_long = df_long.dropna(subset=["Value"])
+# ─── 3A) ROLLING RETURN METRICS ─────────────────────────────────────────────
 
-st.write("After numeric conversion:")
-st.write(f"Non-null values: {df_long['Value'].notna().sum()}")
-st.write(f"Null values: {df_long['Value'].isna().sum()}")
-
-# Final check
-if df_long["Value"].notna().sum() == 0:
-    st.error("No numeric values found after conversion!")
+# First, ensure df_long has valid dates (this should come after your date filtering)
+if len(df_long) == 0:
+    st.error("No data available after date filtering!")
     st.stop()
+
 # Create pivot table AFTER cleaning
 df_wide = df_long.pivot_table(
     index=["Symbol", "Name", "Date"], 
@@ -196,22 +238,40 @@ df_wide = df_long.pivot_table(
     values="Value"
 ).reset_index()
 
-# ─── 3A) ROLLING RETURN METRICS ─────────────────────────────────────────────
+# Ensure Date column is datetime
 df_wide["Date"] = pd.to_datetime(df_wide["Date"], errors="coerce")
+
+# Get latest date AFTER creating df_wide
 latest_date = df_wide["Date"].max()
+
+# Debug: Check if we have valid data
+st.write(f"df_wide shape: {df_wide.shape}")
+st.write(f"Latest date: {latest_date}")
+st.write(f"Date range: {df_wide['Date'].min()} to {df_wide['Date'].max()}")
+
+# Check if we have the required columns
+required_metrics = ["Total Return Level"]
+missing_metrics = [col for col in required_metrics if col not in df_wide.columns]
+if missing_metrics:
+    st.error(f"Missing required metrics in df_wide: {missing_metrics}")
+    st.write(f"Available columns: {list(df_wide.columns)}")
+    st.stop()
 
 # Sort for rolling calculations
 df_wide = df_wide.sort_values(["Symbol", "Date"])
 
-# Rolling returns
+# Calculate peer averages for Delta calculation
+df_wide["Peer Avg"] = df_wide.groupby("Date")["Total Return Level"].transform("mean")
+df_wide["Delta"] = df_wide["Total Return Level"] - df_wide["Peer Avg"]
+
+# Rolling returns (simplified - using actual rolling windows based on data points)
 df_wide["Return 1Y"] = df_wide.groupby("Symbol")["Total Return Level"].transform(
-    lambda x: x.rolling(window=2, min_periods=1).mean()
+    lambda x: x.rolling(window=12, min_periods=1).mean()  # Assuming monthly data
 )
 df_wide["Return 3Y"] = df_wide.groupby("Symbol")["Total Return Level"].transform(
-    lambda x: x.rolling(window=4, min_periods=1).mean()
+    lambda x: x.rolling(window=36, min_periods=1).mean()  # Assuming monthly data
 )
 df_wide["Return_Since_Inception"] = df_wide.groupby("Symbol")["Total Return Level"].transform("mean")
-
 
 # ─── 3B) SCORE CALCULATION ─────────────────────────────────────────────────
 # Weights and penalties
@@ -220,47 +280,55 @@ WEIGHT_DELTA = 2.0
 PENALTY_VAR = 1.5
 PENALTY_STDDEV = 1.2
 
-# Latest snapshot
+# Latest snapshot - ensure we have data for the latest date
 df_latest = df_wide[df_wide["Date"] == latest_date].copy()
 
-# Score formulas
-df_latest["Score_1Y"] = df_latest["Return 1Y"] * WEIGHT_RETURN + df_latest["Delta"] * WEIGHT_DELTA
-df_latest["Score_3Y"] = df_latest["Return 3Y"] * WEIGHT_RETURN + df_latest["Delta"] * WEIGHT_DELTA
-df_latest["Score_Since_Inception"] = df_latest["Return_Since_Inception"] * WEIGHT_RETURN + df_latest["Delta"] * WEIGHT_DELTA
+# Debug: Check if we have data for latest date
+st.write(f"Records for latest date ({latest_date}): {len(df_latest)}")
 
-# Apply risk penalties
-for score_col in ["Score_1Y", "Score_3Y", "Score_Since_Inception"]:
-    if "Daily Value at Risk (VaR) 5% (1Y Lookback)" in df_latest.columns:
-        df_latest[score_col] -= df_latest["Daily Value at Risk (VaR) 5% (1Y Lookback)"] * PENALTY_VAR
-    if "Annualized Standard Deviation of Monthly Returns (1Y Lookback)" in df_latest.columns:
-        df_latest[score_col] -= df_latest["Annualized Standard Deviation of Monthly Returns (1Y Lookback)"] * PENALTY_STDDEV
+if len(df_latest) == 0:
+    st.error(f"No data found for latest date: {latest_date}")
+    st.write("Available dates:")
+    st.write(df_wide["Date"].value_counts().head(10))
+    st.stop()
 
-# Tier assignment
+# Initialize score columns with the base calculation
+df_latest["Score_1Y"] = df_latest["Return 1Y"] * WEIGHT_RETURN
+df_latest["Score_3Y"] = df_latest["Return 3Y"] * WEIGHT_RETURN  
+df_latest["Score_Since_Inception"] = df_latest["Return_Since_Inception"] * WEIGHT_RETURN
+
+# Add Delta component if available
+if "Delta" in df_latest.columns:
+    df_latest["Score_1Y"] += df_latest["Delta"] * WEIGHT_DELTA
+    df_latest["Score_3Y"] += df_latest["Delta"] * WEIGHT_DELTA
+    df_latest["Score_Since_Inception"] += df_latest["Delta"] * WEIGHT_DELTA
+
+# Apply risk penalties if columns exist
+risk_columns = {
+    "Daily Value at Risk (VaR) 5% (1Y Lookback)": PENALTY_VAR,
+    "Annualized Standard Deviation of Monthly Returns (1Y Lookback)": PENALTY_STDDEV
+}
+
+for risk_col, penalty_weight in risk_columns.items():
+    if risk_col in df_latest.columns:
+        df_latest["Score_1Y"] -= df_latest[risk_col] * penalty_weight
+        df_latest["Score_3Y"] -= df_latest[risk_col] * penalty_weight
+        df_latest["Score_Since_Inception"] -= df_latest[risk_col] * penalty_weight
+        st.write(f"Applied {risk_col} penalty")
+    else:
+        st.write(f"Risk metric not found: {risk_col}")
+
+# Tier assignment function
 def tier(s: float) -> str:
     if pd.isna(s): return "No Data"
     if s >= 8.5: return "Tier 1"
     if s >= 6.0: return "Tier 2"
     return "Tier 3"
 
+# Apply tier assignments
 df_latest["Tier_1Y"] = df_latest["Score_1Y"].apply(tier)
 df_latest["Tier_3Y"] = df_latest["Score_3Y"].apply(tier)
 df_latest["Tier_Since_Inception"] = df_latest["Score_Since_Inception"].apply(tier)
-
-# Top 10 tables
-top10_1Y = df_latest.sort_values("Score_1Y", ascending=False).head(10)
-top10_3Y = df_latest.sort_values("Score_3Y", ascending=False).head(10)
-top10_SI = df_latest.sort_values("Score_Since_Inception", ascending=False).head(10)
-
-# Composite score and tier
-df_latest["Score"] = (
-    0.4 * df_latest["Score_1Y"] +
-    0.3 * df_latest["Score_3Y"] +
-    0.3 * df_latest["Score_Since_Inception"]
-)
-df_latest["Tier"] = df_latest["Score"].apply(tier)
-
-# Re-create top10 composite view
-top10 = df_latest.sort_values("Score", ascending=False).head(10)
 
 # ─── 3C) COMPOSITE SCORE CALCULATION ──────────────────────────────────────
 # Weighted composite score
@@ -273,8 +341,17 @@ df_latest["Score"] = (
 # Assign composite tier
 df_latest["Tier"] = df_latest["Score"].apply(tier)
 
-# Top 10 composite funds
+# Create top 10 tables
+top10_1Y = df_latest.sort_values("Score_1Y", ascending=False).head(10)
+top10_3Y = df_latest.sort_values("Score_3Y", ascending=False).head(10)
+top10_SI = df_latest.sort_values("Score_Since_Inception", ascending=False).head(10)
 top10 = df_latest.sort_values("Score", ascending=False).head(10)
+
+# Debug: Show score statistics
+st.write("Score Statistics:")
+st.write(f"Score_1Y: min={df_latest['Score_1Y'].min():.2f}, max={df_latest['Score_1Y'].max():.2f}")
+st.write(f"Score_3Y: min={df_latest['Score_3Y'].min():.2f}, max={df_latest['Score_3Y'].max():.2f}")
+st.write(f"Composite Score: min={df_latest['Score'].min():.2f}, max={df_latest['Score'].max():.2f}")
 
 
 
