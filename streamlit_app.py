@@ -212,53 +212,94 @@ if missing_metrics:
 df_wide["Peer Avg"] = df_wide.groupby("Date")["Total Return Level"].transform("mean")
 df_wide["Delta"] = df_wide["Total Return Level"] - df_wide["Peer Avg"]
 
-# ─── 3) SCORE & TIER ────────────────────────────────────────────────────────
+def compute_score(row, weights):
+    score = 0.0
+    for metric, weights in weights.items():
+        if pd.notna(row.get(metric)):
+            score += row[metric] * weights 
+    return score 
+
+# ─── 3A) ROLLING RETURN METRICS ─────────────────────────────────────────────
 df_wide["Date"] = pd.to_datetime(df_wide["Date"], errors="coerce")
-
-# ⛔️ DO NOT FILTER OUT "FUTURE" DATES — you *want* to include 2025-12-31
-# today = pd.Timestamp.today()
-# df_wide = df_wide[df_wide["Date"] <= today]
-
-# ✅ Recalculate latest date
 latest_date = df_wide["Date"].max()
-df_score = df_wide[df_wide["Date"] == latest_date].copy()
 
-# ✅ UI override for mislabeled placeholder
-if latest_date == pd.to_datetime("2025-12-31"):
-    display_date = "2025-07-07"
-else:
-    display_date = latest_date.date()
+# Sort for rolling calculations
+df_wide = df_wide.sort_values(["Symbol", "Date"])
 
-st.markdown(f"**Data as of:** {display_date}")
+# Rolling returns
+df_wide["Return 1Y"] = df_wide.groupby("Symbol")["Total Return Level"].transform(
+    lambda x: x.rolling(window=2, min_periods=1).mean()
+)
+df_wide["Return 3Y"] = df_wide.groupby("Symbol")["Total Return Level"].transform(
+    lambda x: x.rolling(window=4, min_periods=1).mean()
+)
+df_wide["Return_Since_Inception"] = df_wide.groupby("Symbol")["Total Return Level"].transform("mean")
 
-# ✅ Ensure required columns are present
-required_columns = ["Symbol", "Name", "Date", "Total Return Level"]
-missing_cols = [col for col in required_columns if col not in df_wide.columns]
-if missing_cols:
-    st.error(f"Missing required columns: {missing_cols}")
-    st.stop()
 
-# Calculate score with available columns
-df_score["Score"] = df_score["Total Return Level"] * 3.0 + df_score["Delta"] * 2.0
+# ─── 3B) SCORE CALCULATION ─────────────────────────────────────────────────
+# Weights and penalties
+WEIGHT_RETURN = 3.0
+WEIGHT_DELTA = 2.0
+PENALTY_VAR = 1.5
+PENALTY_STDDEV = 1.2
 
-# Subtract VaR and StdDev if available
-if "Daily Value at Risk (VaR) 5% (1Y Lookback)" in df_score.columns:
-    df_score["Score"] -= df_score["Daily Value at Risk (VaR) 5% (1Y Lookback)"] * 1.5
+# Latest snapshot
+df_latest = df_wide[df_wide["Date"] == latest_date].copy()
 
-if "Annualized Standard Deviation of Monthly Returns (1Y Lookback)" in df_score.columns:
-    df_score["Score"] -= df_score["Annualized Standard Deviation of Monthly Returns (1Y Lookback)"] * 1.2
+# Score formulas
+df_latest["Score_1Y"] = df_latest["Return 1Y"] * WEIGHT_RETURN + df_latest["Delta"] * WEIGHT_DELTA
+df_latest["Score_3Y"] = df_latest["Return 3Y"] * WEIGHT_RETURN + df_latest["Delta"] * WEIGHT_DELTA
+df_latest["Score_Since_Inception"] = df_latest["Return_Since_Inception"] * WEIGHT_RETURN + df_latest["Delta"] * WEIGHT_DELTA
 
+# Apply risk penalties
+for score_col in ["Score_1Y", "Score_3Y", "Score_Since_Inception"]:
+    if "Daily Value at Risk (VaR) 5% (1Y Lookback)" in df_latest.columns:
+        df_latest[score_col] -= df_latest["Daily Value at Risk (VaR) 5% (1Y Lookback)"] * PENALTY_VAR
+    if "Annualized Standard Deviation of Monthly Returns (1Y Lookback)" in df_latest.columns:
+        df_latest[score_col] -= df_latest["Annualized Standard Deviation of Monthly Returns (1Y Lookback)"] * PENALTY_STDDEV
+
+# Tier assignment
 def tier(s: float) -> str:
-    if pd.isna(s):
-        return "No Data"
+    if pd.isna(s): return "No Data"
     if s >= 8.5: return "Tier 1"
     if s >= 6.0: return "Tier 2"
     return "Tier 3"
 
-df_score["Tier"] = df_score["Score"].apply(tier)
+df_latest["Tier_1Y"] = df_latest["Score_1Y"].apply(tier)
+df_latest["Tier_3Y"] = df_latest["Score_3Y"].apply(tier)
+df_latest["Tier_Since_Inception"] = df_latest["Score_Since_Inception"].apply(tier)
 
-# Prepare Top 10
-top10 = df_score.sort_values("Score", ascending=False).head(10)
+# Top 10 tables
+top10_1Y = df_latest.sort_values("Score_1Y", ascending=False).head(10)
+top10_3Y = df_latest.sort_values("Score_3Y", ascending=False).head(10)
+top10_SI = df_latest.sort_values("Score_Since_Inception", ascending=False).head(10)
+
+# Composite score and tier
+df_latest["Score"] = (
+    0.4 * df_latest["Score_1Y"] +
+    0.3 * df_latest["Score_3Y"] +
+    0.3 * df_latest["Score_Since_Inception"]
+)
+df_latest["Tier"] = df_latest["Score"].apply(tier)
+
+# Re-create top10 composite view
+top10 = df_latest.sort_values("Score", ascending=False).head(10)
+
+# ─── 3C) COMPOSITE SCORE CALCULATION ──────────────────────────────────────
+# Weighted composite score
+df_latest["Score"] = (
+    0.4 * df_latest["Score_1Y"] +
+    0.3 * df_latest["Score_3Y"] +
+    0.3 * df_latest["Score_Since_Inception"]
+)
+
+# Assign composite tier
+df_latest["Tier"] = df_latest["Score"].apply(tier)
+
+# Top 10 composite funds
+top10 = df_latest.sort_values("Score", ascending=False).head(10)
+
+
 
 # ─── 4) STREAMLIT UI ──────────────────────────────────────────────────────
 st.title("Semi-Liquid Fund Selection Dashboard")
@@ -283,14 +324,14 @@ for i, tab in enumerate(tabs):
             top_n = result_df.sort_values("Score", ascending=False).head(10)
             st.write(f"**Top 10 Funds – {result_df['Period'].iloc[0]}**")
             st.dataframe(top_n[["Symbol", "Name", "Score", "Tier"]], height=400)
-
+            st.write(df_long.groupby("Symbol")["Date"].nunique().sort_values(ascending=False))
 
 st.subheader("Full Fund Scores & Metrics")
-st.dataframe(df_score, height=600)
+st.dataframe(df_latest, height=600)
 
 col1, col2 = st.columns(2)
 col1.metric("Latest Date", latest_date.strftime("%Y-%m-%d"))
-col2.metric("Funds Scored", len(df_score))
+col2.metric("Funds Scored", len(df_latest))
 
 def color_tier(val):
     if val == "Tier 1":
@@ -301,7 +342,7 @@ def color_tier(val):
         return "background-color: #f8d7da"  # red
     return ""
 
-styled_df = df_score.style.applymap(color_tier, subset=["Tier"])
+styled_df = df_latest.style.applymap(color_tier, subset=["Tier"])
 st.subheader("Full Fund Scores & Metrics")
 st.dataframe(styled_df, height=600)
 
@@ -312,7 +353,7 @@ top_plot = top10.sort_values("Score", ascending=True)
 fig, ax = plt.subplots(figsize=(8, 5))
 ax.barh(top_plot["Name"], top_plot["Score"])
 ax.set_xlabel("Composite Score")
-ax.set_title("Top 10 Funds by Score")
+ax.set_title("Top 10 Funds by Composite Score")
 st.pyplot(fig)
 
 with st.sidebar:
@@ -326,7 +367,12 @@ with st.sidebar:
     Final score = rewards performance, penalizes risk.
     """)
 
-selected_tiers = st.multiselect("Select Tiers to Display", options=["Tier 1", "Tier 2", "Tier 3", "No Data"], default=["Tier 1", "Tier 2", "Tier 3"])
-filtered = df_score[df_score["Tier"].isin(selected_tiers)]
+selected_tiers = st.multiselect(
+    "Select Tiers to Display",
+    options=["Tier 1", "Tier 2", "Tier 3", "No Data"],
+    default=["Tier 1", "Tier 2", "Tier 3"]
+)
+filtered = df_latest[df_latest["Tier"].isin(selected_tiers)]
 st.dataframe(filtered, height=600)
+
 
