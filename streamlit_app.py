@@ -61,7 +61,19 @@ def score_funds_by_period(df_long, period_years=None):
 # ─── 1) AUTH ───────────────────────────────────────────────────────────────
 SCOPES = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 import json
-creds_dict = json.loads(st.secrets["GOOGLE_CREDENTIALS"])
+# Build the service-account dict from individual secret fields
+creds_dict = {
+    "type":                        st.secrets["type"],
+    "project_id":                  st.secrets["project_id"],
+    "private_key_id":              st.secrets["private_key_id"],
+    "private_key":                 st.secrets["private_key"],
+    "client_email":                st.secrets["client_email"],
+    "client_id":                   st.secrets["client_id"],
+    "auth_uri":                    st.secrets["auth_uri"],
+    "token_uri":                   st.secrets["token_uri"],
+    "auth_provider_x509_cert_url": st.secrets["auth_provider_x509_cert_url"],
+    "client_x509_cert_url":        st.secrets["client_x509_cert_url"],
+}
 creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
 client = gspread.authorize(creds)
 
@@ -235,7 +247,6 @@ st.write(f"✅ Valid dates: {valid_dates} | ❌ Invalid dates: {invalid_dates}")
 if valid_dates == 0:
     st.error("🛑 No valid dates found — check spreadsheet headers for typos!")
     st.stop()
-
 
 # Drop rows with invalid dates
 df_long = df_long[df_long["Date"].notna()]
