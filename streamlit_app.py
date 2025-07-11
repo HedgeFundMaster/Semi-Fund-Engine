@@ -4,6 +4,10 @@ import gspread
 from google.oauth2.service_account import Credentials
 from datetime import datetime, timedelta
 
+import logging
+logging.basicConfig(level=logging.DEBUG)
+st.set_page_config(page_title="Fund Dashboard", layout="wide")
+
 def score_funds_by_period(df_long, period_years=None):
     """
     Scores funds based on Total Return Level over a given period.
@@ -100,50 +104,96 @@ raw_data = values[header_idx+1:]
 st.write(f"Raw headers: {raw_headers}")
 st.write(f"Data rows: {len(raw_data)}")
 
-# Function to convert Excel serial date to 'YYYY-MM-DD'
-
-def convert_excel_date(date_str):
-    """Convert Excel serial (e.g. "46022") to 'YYYY-MM-DD', else return None."""
+# FIXED: Better date detection and parsing function
+def is_date_column(header_str):
+    """Check if a header represents a date column"""
+    header_str = str(header_str).strip()
+    
+    # Check for YYYY-MM-DD format
+    if len(header_str) == 10 and header_str.count('-') == 2:
+        try:
+            pd.to_datetime(header_str, format="%Y-%m-%d")
+            return True
+        except:
+            pass
+    
+    # Check for Excel serial number (numeric and in reasonable range)
     try:
-        serial = int(date_str)
-        epoch  = datetime(1899, 12, 30)
-        return (epoch + timedelta(days=serial)).strftime("%Y-%m-%d")
-    except (ValueError, TypeError):
-        # If it already looks like YYYY-MM-DD, keep it
-        if isinstance(date_str, str) and len(date_str)==10 and date_str.count('-')==2:
+        serial = float(header_str)
+        if 1 <= serial <= 2958465:  # Valid Excel date range
+            return True
+    except:
+        pass
+    
+    return False
+
+def convert_to_standard_date(date_str):
+    """Convert various date formats to YYYY-MM-DD string"""
+    date_str = str(date_str).strip()
+    
+    # Already in YYYY-MM-DD format
+    if len(date_str) == 10 and date_str.count('-') == 2:
+        try:
+            # Validate it's a real date
+            pd.to_datetime(date_str, format="%Y-%m-%d")
             return date_str
-        return None
+        except:
+            pass
+    
+    # Try Excel serial conversion
+    try:
+        serial = float(date_str)
+        if 1 <= serial <= 2958465:
+            epoch = datetime(1899, 12, 30)
+            converted_date = epoch + timedelta(days=int(serial))
+            return converted_date.strftime("%Y-%m-%d")
+    except:
+        pass
+    
+    # Try general parsing
+    try:
+        parsed_date = pd.to_datetime(date_str)
+        return parsed_date.strftime("%Y-%m-%d")
+    except:
+        pass
+    
+    return None
 
-clean_headers = []  # final column names
-valid_idx     = []  # which raw_headers columns to keep
+# Process headers
+clean_headers = []
+valid_idx = []
 
-# Process each raw header
-for i, h in enumerate(raw_headers):
-    h = h.strip()
-    if not h:
-        # skip blanks entirely
+for i, header in enumerate(raw_headers):
+    header = str(header).strip()
+    
+    if not header:
         continue
-
-    # Try Excel serial → date
-    parsed = convert_excel_date(h)
-    if parsed:
-        clean_headers.append(parsed)
-        valid_idx.append(i)
+    
+    # Check if it's a date column
+    if is_date_column(header):
+        converted_date = convert_to_standard_date(header)
+        if converted_date:
+            clean_headers.append(converted_date)
+            valid_idx.append(i)
+        else:
+            st.warning(f"Could not convert date header: {header}")
     else:
-        # keep non‐date metrics like "Symbol","Name","Metric"
-        clean_headers.append(h)
+        # Non-date column (Symbol, Name, Metric, etc.)
+        clean_headers.append(header)
         valid_idx.append(i)
 
-# Debug print
-st.write("Using columns:", clean_headers)
+# Debug output
+st.write("=== HEADER PROCESSING DEBUG ===")
+st.write(f"Original headers: {raw_headers}")
+st.write(f"Clean headers: {clean_headers}")
+st.write(f"Valid indices: {valid_idx}")
 
-# Slice raw_data into rows of only those valid columns
-rows = [[r[i] for i in valid_idx] for r in raw_data]
-
-# Build the wide initial DataFrame
+# Build DataFrame with clean headers
+rows = [[row[i] for i in valid_idx] for row in raw_data]
 df_initial = pd.DataFrame(rows, columns=clean_headers)
-st.write("Initial DF columns:", list(df_initial.columns))
 
+st.write(f"Initial DataFrame shape: {df_initial.shape}")
+st.write("Initial DataFrame columns:", list(df_initial.columns))
 
 # Check required columns
 required_cols = ["Symbol", "Name", "Metric"]
@@ -152,86 +202,58 @@ if missing_cols:
     st.error(f"Missing required columns: {missing_cols}")
     st.write(f"Available columns: {list(df_initial.columns)}")
     st.stop()
+
 # Melt to long form
 df_long = df_initial.melt(
-    id_vars=["Symbol","Name","Metric"],
+    id_vars=["Symbol", "Name", "Metric"],
     var_name="Date",
     value_name="Value"
 )
 
-# Coerce Value to numeric and drop NaNs
+st.write(f"After melting: {df_long.shape}")
+
+# ─── 2.5) SIMPLIFIED DATE CONVERSION ────────────────────────────────────────
+
+# Debug: Show what we're working with
+st.write("=== DATE CONVERSION DEBUG ===")
+st.write("Sample Date values from melted data:")
+st.write(df_long["Date"].head(10).tolist())
+st.write("Unique dates:", df_long["Date"].nunique())
+
+# Clean and convert Date column
+df_long["Date"] = df_long["Date"].apply(lambda d: convert_to_standard_date(d))
+df_long = df_long[df_long["Date"].notna()]
+df_long["Date"] = pd.to_datetime(df_long["Date"], errors="coerce")
+
+# Check results
+valid_dates = df_long["Date"].notna().sum()
+invalid_dates = df_long["Date"].isna().sum()
+
+st.write(f"✅ Valid dates: {valid_dates} | ❌ Invalid dates: {invalid_dates}")
+
+# Only stop if ALL dates are invalid (very rare after fallback clean)
+if valid_dates == 0:
+    st.error("🛑 No valid dates found — check spreadsheet headers for typos!")
+    st.stop()
+
+
+# Drop rows with invalid dates
+df_long = df_long[df_long["Date"].notna()]
+
+# Convert Value column to numeric
 df_long["Value"] = pd.to_numeric(df_long["Value"], errors="coerce")
 df_long = df_long.dropna(subset=["Value"])
 
-# ─── 2.5) DATE FILTERING ────────────────────────────────────────────────────
-
-# Get date columns (exclude the first 3 columns)
-date_cols = [col for col in df_initial.columns if col not in required_cols]
-st.write(f"Date columns found: {date_cols}")
-
-# Debug: Check what's in the Date column before conversion
-st.write("Sample Date values before conversion:")
-st.write(df_long["Date"].head(10).tolist())
-
-# Convert Date column to datetime - handle both Excel serial and YYYY-MM-DD formats
-def parse_date_flexible(date_str):
-    """Parse date from either Excel serial or YYYY-MM-DD format"""
-    if pd.isna(date_str):
-        return pd.NaT
-    
-    # Try Excel serial conversion first
-    try:
-        serial = int(float(date_str))
-        epoch = datetime(1899, 12, 30)
-        return epoch + timedelta(days=serial)
-    except (ValueError, TypeError):
-        pass
-    
-    # Try YYYY-MM-DD format
-    try:
-        return pd.to_datetime(date_str, format="%Y-%m-%d")
-    except:
-        pass
-    
-    # Try general datetime parsing as fallback
-    try:
-        return pd.to_datetime(date_str)
-    except:
-        return pd.NaT
-
-df_long["Date"] = df_long["Date"].apply(parse_date_flexible)
-
-# Debug: Check conversion results
-st.write("Sample Date values after conversion:")
-st.write(df_long["Date"].head(10).tolist())
-st.write(f"Valid dates: {df_long['Date'].notna().sum()}")
-st.write(f"Invalid dates: {df_long['Date'].isna().sum()}")
-
-# Drop any rows where Date conversion failed
-df_long = df_long[df_long["Date"].notna()]
-
-st.write(f"After date filtering: {len(df_long)} rows")
+st.write(f"Final df_long shape: {df_long.shape}")
+st.write(f"Date range: {df_long['Date'].min()} to {df_long['Date'].max()}")
 
 if len(df_long) == 0:
-    st.error("No rows with valid dates found!")
-    st.write("DEBUG: Original date values that failed conversion:")
-    # Re-create df_long to show failed conversions
-    df_debug = df_initial.melt(
-        id_vars=["Symbol","Name","Metric"],
-        var_name="Date",
-        value_name="Value"
-    )
-    st.write(df_debug["Date"].value_counts())
+    st.error("No valid data remaining after cleaning!")
     st.stop()
 
-# ─── 3A) ROLLING RETURN METRICS ─────────────────────────────────────────────
+# ─── 3A) CREATE PIVOT TABLE AND PROCEED WITH ANALYSIS ──────────────────────
 
-# First, ensure df_long has valid dates (this should come after your date filtering)
-if len(df_long) == 0:
-    st.error("No data available after date filtering!")
-    st.stop()
-
-# Create pivot table AFTER cleaning
+# Create pivot table for wide format analysis
 df_wide = df_long.pivot_table(
     index=["Symbol", "Name", "Date"], 
     columns="Metric", 
@@ -240,6 +262,15 @@ df_wide = df_long.pivot_table(
 
 # Ensure Date column is datetime
 df_wide["Date"] = pd.to_datetime(df_wide["Date"], errors="coerce")
+latest_date = df_wide["Date"].max()
+
+st.write(f"✅ Data successfully processed!")
+st.write(f"📊 df_wide shape: {df_wide.shape}")
+st.write(f"📅 Latest date: {latest_date}")
+st.write(f"🏢 Number of funds: {df_wide['Symbol'].nunique()}")
+st.write(f"📈 Available metrics: {[col for col in df_wide.columns if col not in ['Symbol', 'Name', 'Date']]}")
+
+# Debug Fix: List above from lines 64-268
 
 # Get latest date AFTER creating df_wide
 latest_date = df_wide["Date"].max()
