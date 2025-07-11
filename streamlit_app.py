@@ -1,4 +1,4 @@
-import streamlit as st
+
 import pandas as pd
 import gspread
 from google.oauth2.service_account import Credentials
@@ -56,24 +56,35 @@ def score_funds_by_period(df_long, period_years=None):
     df_score["Period"] = f"{period_years}Y" if period_years else "Since Inception"
     
     return df_score
+# ─── 1) AUTHENTICATION ────────────────────────────────────────────────
+# This section handles authentication with Google Sheets using service account credentials.
+import streamlit as st
+import os, json
 
+SCOPES = [
+    "https://spreadsheets.google.com/feeds",
+    "https://www.googleapis.com/auth/drive",
+]
 
-# ─── 1) AUTH ───────────────────────────────────────────────────────────────
-SCOPES = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-import json
-# Build the service-account dict from individual secret fields
-creds_dict = {
-    "type":                        st.secrets["type"],
-    "project_id":                  st.secrets["project_id"],
-    "private_key_id":              st.secrets["private_key_id"],
-    "private_key":                 st.secrets["private_key"],
-    "client_email":                st.secrets["client_email"],
-    "client_id":                   st.secrets["client_id"],
-    "auth_uri":                    st.secrets["auth_uri"],
-    "token_uri":                   st.secrets["token_uri"],
-    "auth_provider_x509_cert_url": st.secrets["auth_provider_x509_cert_url"],
-    "client_x509_cert_url":        st.secrets["client_x509_cert_url"],
-}
+# 1) Try loading from local file (dev)
+if os.path.exists("gcp_key.json"):
+    with open("gcp_key.json", "r") as fp:
+        creds_dict = json.load(fp)
+# 2) Fallback to Streamlit secrets (Cloud)
+else:
+    creds_dict = {
+        "type":                        st.secrets["type"],
+        "project_id":                  st.secrets["project_id"],
+        "private_key_id":              st.secrets["private_key_id"],
+        "private_key":                 st.secrets["private_key"],
+        "client_email":                st.secrets["client_email"],
+        "client_id":                   st.secrets["client_id"],
+        "auth_uri":                    st.secrets["auth_uri"],
+        "token_uri":                   st.secrets["token_uri"],
+        "auth_provider_x509_cert_url": st.secrets["auth_provider_x509_cert_url"],
+        "client_x509_cert_url":        st.secrets["client_x509_cert_url"],
+    }
+
 creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
 client = gspread.authorize(creds)
 

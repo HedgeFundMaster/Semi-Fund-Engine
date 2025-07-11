@@ -13,3 +13,6 @@ credentials.json
 .DS_Store
 
 .streamlit/secrets.toml
+
+# Ignore GCP 
+gcp_key.json 
