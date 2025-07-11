@@ -2,6 +2,8 @@
 import streamlit as st
 st.set_page_config(page_title="Fund Dashboard", layout="wide")
 
+st.write("✅ App code loaded")    # ← add this, redeploy, and look for it in the UI
+
 import logging
 logging.basicConfig(level=logging.DEBUG)
 
