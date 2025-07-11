@@ -663,3 +663,7 @@ def create_dashboard():
             st.warning(f"⚠️ {quality_metrics['missing_values']} missing values detected")
         if quality_metrics['duplicates'] > 0:
             st.warning(f"⚠️ {quality_metrics['duplicates']} duplicate records detected")
+
+# ─── RUN THE DASHBOARD ────────────────────────────────────────────────────
+if __name__ == "__main__":
+    create_dashboard()
