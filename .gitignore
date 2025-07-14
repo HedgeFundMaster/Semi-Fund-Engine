@@ -16,3 +16,5 @@ credentials.json
 
 # Ignore GCP 
 gcp_key.json .streamlit/secrets.toml
+gcp_key.json
+gcp_key.json
