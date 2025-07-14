@@ -6,9 +6,6 @@ __pycache__/
 *.py[cod]
 .DS_Store
 
-# Ignore credentials
-credentials.json
-
 # Ignore OS files 
 .DS_Store
 
