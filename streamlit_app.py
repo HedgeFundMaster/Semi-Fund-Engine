@@ -75,66 +75,102 @@ def load_inception_group(tab_keyword: str) -> pd.DataFrame:
     client = get_gspread_client()
     sheet = client.open_by_key(SHEET_ID)
     
-    # Debug: Show all worksheet titles
-    all_worksheets = [w.title for w in sheet.worksheets()]
-    st.write(f"🔍 All available worksheets: {all_worksheets}")
-    
     ws = next((w for w in sheet.worksheets() if tab_keyword in w.title), None)
     if ws is None:
+        all_worksheets = [w.title for w in sheet.worksheets()]
         st.error(f"⚠️ No worksheet with '{tab_keyword}' in the title.")
         st.error(f"Available sheets: {all_worksheets}")
         st.stop()
     
-    st.write(f"✅ Found worksheet: '{ws.title}'")
-    
-    # Get all values
-    values = ws.get_all_values()
-    if not values:
-        st.error(f"⚠️ Worksheet '{ws.title}' is empty!")
+    try:
+        # Get all values as a list of lists
+        raw_values = ws.get_all_values()
+        if not raw_values:
+            st.error(f"⚠️ Worksheet '{ws.title}' is empty!")
+            st.stop()
+        
+        # Separate header and data
+        header = raw_values[0]
+        data_rows = raw_values[1:]
+        
+        if not data_rows:
+            st.error(f"⚠️ No data rows found in '{ws.title}'!")
+            st.stop()
+        
+        # Clean header (remove spaces)
+        header = [str(col).strip() for col in header]
+        header_len = len(header)
+        
+        # Process each data row to ensure consistent length
+        processed_data = []
+        for i, row in enumerate(data_rows):
+            # Convert all values to strings first, then clean
+            clean_row = [str(val).strip() if val else '' for val in row]
+            
+            # Ensure row matches header length
+            if len(clean_row) < header_len:
+                # Pad with empty strings
+                clean_row.extend([''] * (header_len - len(clean_row)))
+            elif len(clean_row) > header_len:
+                # Truncate if too long
+                clean_row = clean_row[:header_len]
+            
+            processed_data.append(clean_row)
+        
+        # Create DataFrame from processed data
+        df = pd.DataFrame(processed_data, columns=header)
+        
+        # Replace empty strings with None for proper NaN handling
+        df = df.replace('', None)
+        
+        # Convert numeric columns safely
+        for col in df.columns:
+            try:
+                # Skip if column doesn't exist or is malformed
+                if col not in df.columns:
+                    continue
+                    
+                # Get the column as a pandas Series
+                col_data = df[col]
+                
+                # Only proceed if it's actually a Series
+                if not isinstance(col_data, pd.Series):
+                    st.warning(f"Column '{col}' is not a proper Series, skipping numeric conversion")
+                    continue
+                
+                # Try numeric conversion
+                df[col] = pd.to_numeric(col_data, errors='ignore')
+                
+            except Exception as e:
+                st.warning(f"Could not convert column '{col}' to numeric: {str(e)}")
+                continue
+        
+        # Handle date column if it exists
+        if 'Inception Date' in df.columns:
+            try:
+                df['Inception Date'] = pd.to_datetime(df['Inception Date'], errors='coerce')
+            except Exception as e:
+                st.warning(f"Could not convert Inception Date: {str(e)}")
+        
+        # Check for required columns
+        required_cols = ['Ticker', 'Fund']
+        missing_cols = [col for col in required_cols if col not in df.columns]
+        if missing_cols:
+            st.error(f"⚠️ Missing required columns in {tab_keyword}: {missing_cols}")
+            st.stop()
+        
+        # Remove rows where both Ticker and Fund are missing
+        df = df.dropna(subset=required_cols, how='all')
+        
+        # Remove completely empty rows
+        df = df.dropna(how='all')
+        
+        return df
+        
+    except Exception as e:
+        st.error(f"🚨 Error loading data from '{ws.title}': {str(e)}")
+        st.error("Please check your Google Sheet data format and try again.")
         st.stop()
-    
-    st.write(f"📊 Raw data rows: {len(values)}")
-    if len(values) > 0:
-        st.write(f"📋 Raw header row: {values[0]}")
-    
-    
-    # Find header row
-    header, *data = values
-    st.write(f"📋 Parsed header: {header}")
-    
-    df = pd.DataFrame(data, columns=header)
-    st.write(f"📊 DataFrame shape before cleaning: {df.shape}")
-    
-    df = df.map(lambda v: v.strip() if isinstance(v, str) else v)
-    
-    # Clean column names (remove extra spaces)
-    df.columns = df.columns.str.strip()
-    st.write(f"📋 Cleaned columns: {list(df.columns)}")
-    
-    # Check if 'Inception Date' exists after cleaning
-    if 'Inception Date' not in df.columns:
-        st.error(f"❌ 'Inception Date' column not found after cleaning!")
-        st.error(f"Available columns: {list(df.columns)}")
-        # Show a few sample column names to check for hidden characters
-        for i, col in enumerate(df.columns[:5]):
-            st.write(f"Column {i}: '{col}' (length: {len(col)}, repr: {repr(col)})")
-        st.stop()
-    
-    for col in df.columns: 
-        df[col] = pd.to_numeric(df[col], errors='ignore')
-    
-    df['Inception Date'] = pd.to_datetime(df['Inception Date'], errors='coerce')
-    
-    # Check for required columns before filtering
-    required_cols = ['Ticker', 'Fund']
-    missing_cols = [col for col in required_cols if col not in df.columns]
-    if missing_cols:
-        st.error(f"⚠️ Missing required columns in {tab_keyword}: {missing_cols}")
-        st.stop()
-    
-    df = df.dropna(subset=['Ticker', 'Fund'])
-    st.write(f"📊 Final DataFrame shape: {df.shape}")
-    return df
 # ─── 3) SCORING IMPLEMENTATIONS ──────────────────────────────────────────────────
 def standardize_column_names(df):
     """Standardize column names across different sheets"""
