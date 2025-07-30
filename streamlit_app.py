@@ -137,15 +137,70 @@ def load_inception_group(tab_keyword: str) -> pd.DataFrame:
     st.write(f"📊 Final DataFrame shape: {df.shape}")
     return df
 # ─── 3) SCORING IMPLEMENTATIONS ──────────────────────────────────────────────────
+def standardize_column_names(df):
+    """Standardize column names across different sheets"""
+    df = df.copy()
+    
+    # Create a mapping for inconsistent column names
+    column_mapping = {
+        'Sharpe (1y)': 'Sharpe (1Y)',
+        'Sortino (1y)': 'Sortino (1Y)',
+        'Sortino (3Y) ': 'Sortino (3Y)',  # Remove trailing space
+        'Std Dev (1Y) ': 'Std Dev (1Y)',  # Remove trailing space
+        'Std Dev (3Y) ': 'Std Dev (3Y)',  # Remove trailing space
+        'Std Dev (5Y) ': 'Std Dev (5Y)',  # Remove trailing space
+        'VaR ': 'VaR',  # Remove trailing space
+    }
+    
+    # Apply the mapping
+    df = df.rename(columns=column_mapping)
+    
+    # Remove duplicate columns (keep first occurrence)
+    df = df.loc[:, ~df.columns.duplicated()]
+    
+    return df
+
+def safe_numeric_conversion(df, columns):
+    """Safely convert columns to numeric, handling any conversion issues"""
+    for col in columns:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+            # Fill NaN values with 0 for calculations
+            df[col] = df[col].fillna(0)
+    return df
+
 def calculate_scores_1y(df: pd.DataFrame):
     df = df.copy()
+    df = standardize_column_names(df)
+    
+    # Ensure numeric conversion for required columns
+    numeric_cols = ['Total Return', 'Sharpe (1Y)', 'Sortino (1Y)', 'AUM', 'Net Expense', 'Std Dev (1Y)', 'VaR']
+    df = safe_numeric_conversion(df, numeric_cols)
+    
     df['Delta'] = df['Total Return'] - df.groupby("Category")['Total Return'].transform("mean")
-    df["sharpe_composite"] = df ['Sharpe (1Y)']
+    df["sharpe_composite"] = df['Sharpe (1Y)']
     df['sortino_composite'] = df['Sortino (1Y)']
-    df['aum_score'] = (np.log1p(df['AUM']) - np.log1p(df['AUM']).min()) /\
-                        (np.log1p(df['AUM']).max() - np.log1p(df['AUM']).min())
-    df['expense_score'] = 1 - ((df['Net Expense']) - df['Net Expense'].min()) /\
-                            (df['Net Expense'].max() - df['Net Expense'].min())
+    
+    # Safe AUM score calculation with error handling
+    try:
+        aum_log = np.log1p(df['AUM'])
+        aum_min, aum_max = aum_log.min(), aum_log.max()
+        if aum_max != aum_min:
+            df['aum_score'] = (aum_log - aum_min) / (aum_max - aum_min)
+        else:
+            df['aum_score'] = 0.5  # Default if all AUM values are the same
+    except:
+        df['aum_score'] = 0.5  # Default fallback
+    
+    # Safe expense score calculation
+    try:
+        exp_min, exp_max = df['Net Expense'].min(), df['Net Expense'].max()
+        if exp_max != exp_min:
+            df['expense_score'] = 1 - ((df['Net Expense'] - exp_min) / (exp_max - exp_min))
+        else:
+            df['expense_score'] = 0.5  # Default if all expense values are the same
+    except:
+        df['expense_score'] = 0.5  # Default fallback
     
     df['Score'] = (
         METRIC_WEIGHTS['sharpe_composite'] * df['sharpe_composite'] +
@@ -155,14 +210,15 @@ def calculate_scores_1y(df: pd.DataFrame):
         METRIC_WEIGHTS['aum'] * df['aum_score'] +
         METRIC_WEIGHTS['expense'] * df['expense_score']
     )
-    if 'Sharpe (1Y)' in df:
+    
+    if 'Sharpe (1Y)' in df.columns:
         df.loc[df['Sharpe (1Y)'] > INTEGRITY_PENALTY_THRESHOLD, 'Score'] -= INTEGRITY_PENALTY_AMOUNT 
 
-    if 'Std Dev (1Y)' in df:
+    if 'Std Dev (1Y)' in df.columns:
         q3 = df['Std Dev (1Y)'].quantile(0.75)
         df.loc[df['Std Dev (1Y)'] > q3, 'Score'] -= 0.1
 
-    if 'VaR' in df:
+    if 'VaR' in df.columns:
         q3 = df['VaR'].quantile(0.75)
         df.loc[df['VaR'] > q3, 'Score'] -= 0.1 
     
@@ -170,13 +226,35 @@ def calculate_scores_1y(df: pd.DataFrame):
 
 def calculate_scores_3y(df: pd.DataFrame):
     df = df.copy()
+    df = standardize_column_names(df)
+    
+    numeric_cols = ['Total Return (3Y)', 'Sharpe (3Y)', 'Sortino (3Y)', 'Sharpe (1Y)', 'Sortino (1Y)', 
+                   'AUM', 'Net Expense', 'Std Dev (3Y)', '2022 Return']
+    df = safe_numeric_conversion(df, numeric_cols)
+    
     df['Delta'] = df['Total Return (3Y)'] - df.groupby("Category")['Total Return (3Y)'].transform("mean")   
     df['sharpe_composite'] = 0.5 * df['Sharpe (3Y)'] + 0.5 * df['Sharpe (1Y)']
     df['sortino_composite'] = 0.5 * df['Sortino (3Y)'] + 0.5 * df['Sortino (1Y)']
-    df['aum_score'] = (np.log1p(df['AUM']) - np.log1p(df['AUM']).min()) / \
-                      (np.log1p(df['AUM']).max() - np.log1p(df['AUM']).min())
-    df['expense_score'] = 1 - ((df['Net Expense'] - df['Net Expense'].min()) / \
-                             (df['Net Expense'].max() - df['Net Expense'].min()))
+    
+    # Safe calculations
+    try:
+        aum_log = np.log1p(df['AUM'])
+        aum_min, aum_max = aum_log.min(), aum_log.max()
+        if aum_max != aum_min:
+            df['aum_score'] = (aum_log - aum_min) / (aum_max - aum_min)
+        else:
+            df['aum_score'] = 0.5
+    except:
+        df['aum_score'] = 0.5
+        
+    try:
+        exp_min, exp_max = df['Net Expense'].min(), df['Net Expense'].max()
+        if exp_max != exp_min:
+            df['expense_score'] = 1 - ((df['Net Expense'] - exp_min) / (exp_max - exp_min))
+        else:
+            df['expense_score'] = 0.5
+    except:
+        df['expense_score'] = 0.5
 
     df['Score'] = (
         METRIC_WEIGHTS['sharpe_composite'] * df['sharpe_composite'] +
@@ -187,15 +265,14 @@ def calculate_scores_3y(df: pd.DataFrame):
         METRIC_WEIGHTS['expense'] * df['expense_score']
     )
 
-    # Penalty: High Sharpe
-    df.loc[df['Sharpe (3Y)'] > INTEGRITY_PENALTY_THRESHOLD, 'Score'] -= INTEGRITY_PENALTY_AMOUNT
+    # Penalties with safe checks
+    if 'Sharpe (3Y)' in df.columns:
+        df.loc[df['Sharpe (3Y)'] > INTEGRITY_PENALTY_THRESHOLD, 'Score'] -= INTEGRITY_PENALTY_AMOUNT
 
-    # Penalty: Std Dev (3Y)
     if 'Std Dev (3Y)' in df.columns:
         q3 = df['Std Dev (3Y)'].quantile(0.75)
         df.loc[df['Std Dev (3Y)'] >= q3, 'Score'] -= 0.1
 
-    # Penalty: 2022 Return
     if '2022 Return' in df.columns:
         q1 = df['2022 Return'].quantile(0.25)
         df.loc[df['2022 Return'] <= q1, 'Score'] -= 0.1
@@ -204,28 +281,51 @@ def calculate_scores_3y(df: pd.DataFrame):
 
 def calculate_scores_5y(df: pd.DataFrame):
     df = df.copy()
+    df = standardize_column_names(df)
+    
+    numeric_cols = ['Total Return (5Y)', 'Sharpe (5Y)', 'Sortino (5Y)', 'Sharpe (3Y)', 'Sortino (3Y)',
+                   'Sharpe (1Y)', 'Sortino (1Y)', 'AUM', 'Net Expense', 'Std Dev (5Y)', '2022 Return']
+    df = safe_numeric_conversion(df, numeric_cols)
+    
     df['Delta'] = df['Total Return (5Y)'] - df.groupby("Category")['Total Return (5Y)'].transform("mean")
 
-    # Composite Sharpe + Sortino weighting
+    # Composite Sharpe + Sortino weighting with safe fallbacks
     df['sharpe_composite'] = (
-        0.50 * df['Sharpe (5Y)'] +
-        0.30 * df['Sharpe (3Y)'] +
-        0.20 * df['Sharpe (1Y)']
+        0.50 * df.get('Sharpe (5Y)', 0) +
+        0.30 * df.get('Sharpe (3Y)', 0) +
+        0.20 * df.get('Sharpe (1Y)', 0)
     )
 
     df['sortino_composite'] = (
-        0.50 * df['Sortino (5Y)'] +
-        0.30 * df['Sortino (3Y)'] +
-        0.20 * df['Sortino (1Y)']
+        0.50 * df.get('Sortino (5Y)', 0) +
+        0.30 * df.get('Sortino (3Y)', 0) +
+        0.20 * df.get('Sortino (1Y)', 0)
     )
 
-    # Log-normalized AUM
-    df['aum_score'] = (np.log1p(df['AUM']) - np.log1p(df['AUM']).min()) / \
-                      (np.log1p(df['AUM']).max() - np.log1p(df['AUM']).min())
-    df['expense_score'] = 1 - ((df['Net Expense'] - df['Net Expense'].min()) /
-                               (df['Net Expense'].max() - df['Net Expense'].min()))
+    # Safe calculations
+    try:
+        aum_log = np.log1p(df['AUM'])
+        aum_min, aum_max = aum_log.min(), aum_log.max()
+        if aum_max != aum_min:
+            df['aum_score'] = (aum_log - aum_min) / (aum_max - aum_min)
+        else:
+            df['aum_score'] = 0.5
+    except:
+        df['aum_score'] = 0.5
+        
+    try:
+        exp_min, exp_max = df['Net Expense'].min(), df['Net Expense'].max()
+        if exp_max != exp_min:
+            df['expense_score'] = 1 - ((df['Net Expense'] - exp_min) / (exp_max - exp_min))
+        else:
+            df['expense_score'] = 0.5
+    except:
+        df['expense_score'] = 0.5
 
-    # Composite Score
+    # Composite Score - need to add Total Return (5Y) column check
+    if 'Total Return (5Y)' not in df.columns:
+        df['Total Return (5Y)'] = 0  # Default fallback
+        
     df['Score'] = (
         METRIC_WEIGHTS['sharpe_composite'] * df['sharpe_composite'] +
         METRIC_WEIGHTS['sortino_composite'] * df['sortino_composite'] +
@@ -235,21 +335,19 @@ def calculate_scores_5y(df: pd.DataFrame):
         METRIC_WEIGHTS['expense'] * df['expense_score']
     )
 
-    # Integrity Penalty for high Sharpe
-    df.loc[df['Sharpe (5Y)'] > INTEGRITY_PENALTY_THRESHOLD, 'Score'] -= INTEGRITY_PENALTY_AMOUNT
+    # Penalties with safe checks
+    if 'Sharpe (5Y)' in df.columns:
+        df.loc[df['Sharpe (5Y)'] > INTEGRITY_PENALTY_THRESHOLD, 'Score'] -= INTEGRITY_PENALTY_AMOUNT
 
-    # Std Dev Penalty (top quartile)
-    if 'Std Dev (5Y)' in df:
+    if 'Std Dev (5Y)' in df.columns:
         q3 = df['Std Dev (5Y)'].quantile(0.75)
         df.loc[df['Std Dev (5Y)'] >= q3, 'Score'] -= 0.1
 
-    # 2022 Return Penalty (bottom quartile)
-    if '2022 Return' in df:
+    if '2022 Return' in df.columns:
         q1 = df['2022 Return'].quantile(0.25)
         df.loc[df['2022 Return'] <= q1, 'Score'] -= 0.1
 
     return df, None
-
 
 # ─── 3A) TIER ASSIGNMENT ─────────────────────────────────────────────────
 def assign_tiers(df: pd.DataFrame) -> pd.DataFrame:
