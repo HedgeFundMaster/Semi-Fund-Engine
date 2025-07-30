@@ -949,35 +949,151 @@ def create_main_rankings_tab(df_tiered):
         st.markdown("---")
         inception_opts = st.multiselect("Inception Groups:", ["1Y+", "3Y+", "5Y+"], default=["1Y+", "3Y+", "5Y+"])
         tier_opts = st.multiselect("Tiers:", ["Tier 1", "Tier 2", "Tier 3", "No Data"], default=["Tier 1", "Tier 2", "Tier 3", "No Data"])
-        category_opts = st.multiselect("Categories:", sorted(df_tiered['Category'].dropna().unique()), default=sorted(df_tiered['Category'].dropna().unique()))
+        # Handle categories including potential NaN values
+        all_categories = df_tiered['Category'].unique()
+        # Remove NaN from the list but keep track of it
+        categories_for_display = [cat for cat in all_categories if pd.notna(cat)]
+        categories_for_display = sorted(categories_for_display)
+        
+        # Check if there are funds with NaN categories
+        nan_category_count = df_tiered['Category'].isna().sum()
+        if nan_category_count > 0:
+            st.sidebar.warning(f"⚠️ {nan_category_count} funds have missing category data")
+        
+        category_opts = st.multiselect("Categories:", categories_for_display, default=categories_for_display)
         
     
-    # Apply filters
+    # Apply filters with detailed debugging
     filtered_df = df_tiered.copy()
+    st.write(f"🚀 **FILTER DEBUGGING - Starting with {len(filtered_df)} funds**")
     
     # Apply score range
+    before_score = len(filtered_df)
     if score_range and not df_tiered[~pd.isna(df_tiered['Score'])].empty:
+        # Check how many funds have NaN scores
+        nan_score_count = filtered_df['Score'].isna().sum()
+        st.write(f"🔍 Funds with NaN scores before filter: {nan_score_count}")
+        
+        # Only filter funds that have valid scores
         valid_scores = ~pd.isna(filtered_df['Score'])
-        filtered_df = filtered_df[valid_scores & (filtered_df['Score'] >= score_range[0]) & (filtered_df['Score'] <= score_range[1])]
+        score_filtered = filtered_df[valid_scores & (filtered_df['Score'] >= score_range[0]) & (filtered_df['Score'] <= score_range[1])]
+        
+        # Include funds with NaN scores if the range covers the full spectrum
+        score_values = filtered_df['Score'].dropna()
+        if not score_values.empty and score_range[0] <= score_values.min() and score_range[1] >= score_values.max():
+            # Full range selected - include NaN score funds too
+            nan_score_funds = filtered_df[filtered_df['Score'].isna()]
+            filtered_df = pd.concat([score_filtered, nan_score_funds])
+            st.write(f"📊 After score filter (including NaN): {before_score} → {len(filtered_df)} funds")
+        else:
+            filtered_df = score_filtered
+            st.write(f"📊 After score filter (excluding NaN): {before_score} → {len(filtered_df)} funds")
+    else:
+        st.write(f"📊 Score filter skipped: {len(filtered_df)} funds")
     
     # Apply AUM range
+    before_aum = len(filtered_df)
     if aum_range and 'AUM' in filtered_df.columns:
+        # Check how many funds have NaN AUM values
+        nan_aum_count = filtered_df['AUM'].isna().sum()
+        st.write(f"🔍 Funds with NaN AUM before filter: {nan_aum_count}")
+        
+        # Only filter funds that have valid AUM data
         valid_aum = ~pd.isna(filtered_df['AUM'])
-        filtered_df = filtered_df[valid_aum & (filtered_df['AUM'] >= aum_range[0]) & (filtered_df['AUM'] <= aum_range[1])]
+        aum_filtered = filtered_df[valid_aum & (filtered_df['AUM'] >= aum_range[0]) & (filtered_df['AUM'] <= aum_range[1])]
+        
+        # Include funds with NaN AUM if the range covers the full spectrum
+        aum_values = filtered_df['AUM'].dropna()
+        if not aum_values.empty and aum_range[0] <= aum_values.min() and aum_range[1] >= aum_values.max():
+            # Full range selected - include NaN AUM funds too
+            nan_aum_funds = filtered_df[filtered_df['AUM'].isna()]
+            filtered_df = pd.concat([aum_filtered, nan_aum_funds])
+            st.write(f"💰 After AUM filter (including NaN): {before_aum} → {len(filtered_df)} funds")
+        else:
+            filtered_df = aum_filtered
+            st.write(f"💰 After AUM filter (excluding NaN): {before_aum} → {len(filtered_df)} funds")
+    else:
+        st.write(f"💰 AUM filter skipped: {len(filtered_df)} funds")
     
     # Apply expense range
+    before_expense = len(filtered_df)
     if expense_range and 'Net Expense' in filtered_df.columns:
+        # Check how many funds have NaN expense values
+        nan_expense_count = filtered_df['Net Expense'].isna().sum()
+        st.write(f"🔍 Funds with NaN expense before filter: {nan_expense_count}")
+        
+        # Only filter funds that have valid expense data
         valid_expense = ~pd.isna(filtered_df['Net Expense'])
-        filtered_df = filtered_df[valid_expense & (filtered_df['Net Expense'] >= expense_range[0]) & (filtered_df['Net Expense'] <= expense_range[1])]
+        expense_filtered = filtered_df[valid_expense & (filtered_df['Net Expense'] >= expense_range[0]) & (filtered_df['Net Expense'] <= expense_range[1])]
+        
+        # Include funds with NaN expense if the range covers the full spectrum
+        expense_values = filtered_df['Net Expense'].dropna()
+        if not expense_values.empty and expense_range[0] <= expense_values.min() and expense_range[1] >= expense_values.max():
+            # Full range selected - include NaN expense funds too
+            nan_expense_funds = filtered_df[filtered_df['Net Expense'].isna()]
+            filtered_df = pd.concat([expense_filtered, nan_expense_funds])
+            st.write(f"💸 After expense filter (including NaN): {before_expense} → {len(filtered_df)} funds")
+        else:
+            filtered_df = expense_filtered
+            st.write(f"💸 After expense filter (excluding NaN): {before_expense} → {len(filtered_df)} funds")
+    else:
+        st.write(f"💸 Expense filter skipped: {len(filtered_df)} funds")
     
     # Apply fund search
+    before_search = len(filtered_df)
     if selected_fund != "All Funds":
         filtered_df = filtered_df[filtered_df['Ticker'] == selected_fund]
+        st.write(f"🔍 After fund search: {before_search} → {len(filtered_df)} funds")
+    else:
+        st.write(f"🔍 Fund search skipped: {len(filtered_df)} funds")
     
-    # Apply standard filters
+    # Apply inception group filter
+    before_inception = len(filtered_df)
     filtered_df = filtered_df[filtered_df['Inception Group'].isin(inception_opts)]
+    st.write(f"📅 After inception filter: {before_inception} → {len(filtered_df)} funds")
+    
+    # Apply tier filter
+    before_tier = len(filtered_df)
     filtered_df = filtered_df[filtered_df['Tier'].isin(tier_opts)]
-    filtered_df = filtered_df[filtered_df['Category'].isin(category_opts)]
+    st.write(f"🏆 After tier filter: {before_tier} → {len(filtered_df)} funds")
+    
+    # Show what tiers are available vs selected
+    available_tiers = df_tiered['Tier'].value_counts()
+    st.write(f"🔍 Available tiers: {dict(available_tiers)}")
+    st.write(f"🎯 Selected tiers: {tier_opts}")
+    
+    # Apply category filter (including handling of NaN categories)
+    before_category = len(filtered_df)
+    
+    # Check how many funds have NaN categories before filtering
+    nan_categories_before = filtered_df['Category'].isna().sum()
+    st.write(f"🔍 Funds with NaN categories before filter: {nan_categories_before}")
+    
+    # Apply category filter - include NaN categories when all categories are selected
+    if len(category_opts) == len(categories_for_display):
+        # All categories selected - include funds with NaN categories too
+        filtered_df = filtered_df[(filtered_df['Category'].isin(category_opts)) | (filtered_df['Category'].isna())]
+        st.write(f"📂 After category filter (including NaN): {before_category} → {len(filtered_df)} funds")
+    else:
+        # Specific categories selected - exclude NaN categories
+        filtered_df = filtered_df[filtered_df['Category'].isin(category_opts)]
+        st.write(f"📂 After category filter (excluding NaN): {before_category} → {len(filtered_df)} funds")
+    
+    # Show category debugging
+    available_categories = df_tiered['Category'].value_counts(dropna=False)  # Include NaN counts
+    st.write(f"🔍 Total available categories: {len(available_categories)}")
+    st.write(f"🎯 Selected categories: {len(category_opts)}")
+    
+    # Check if NaN categories are causing the loss
+    if nan_categories_before > 0:
+        st.warning(f"⚠️ {nan_categories_before} funds with missing categories were excluded by category filter")
+        # Show some examples of funds with missing categories
+        missing_cat_funds = df_tiered[df_tiered['Category'].isna()]
+        if len(missing_cat_funds) > 0:
+            st.write("📋 Sample funds with missing categories:")
+            st.write(missing_cat_funds[['Ticker', 'Fund', 'Tier', 'Inception Group']].head(5))
+    
+    st.write(f"✅ **FINAL RESULT: {len(filtered_df)} funds displayed**")
     
     # Key metrics cards
     col1, col2, col3, col4 = st.columns(4)
