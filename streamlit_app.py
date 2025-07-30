@@ -75,10 +75,18 @@ def get_gspread_client():
 def load_inception_group(tab_keyword: str) -> pd.DataFrame:
     client = get_gspread_client()
     sheet = client.open_by_key(SHEET_ID)
+    
+    # Debug: Show all worksheet titles
+    all_worksheets = [w.title for w in sheet.worksheets()]
+    st.write(f"🔍 All available worksheets: {all_worksheets}")
+    
     ws = next((w for w in sheet.worksheets() if tab_keyword in w.title), None)
     if ws is None:
         st.error(f"⚠️ No worksheet with '{tab_keyword}' in the title.")
+        st.error(f"Available sheets: {all_worksheets}")
         st.stop()
+    
+    st.write(f"✅ Found worksheet: '{ws.title}'")
     
     # Get all values
     values = ws.get_all_values()
@@ -86,17 +94,48 @@ def load_inception_group(tab_keyword: str) -> pd.DataFrame:
         st.error(f"⚠️ Worksheet '{ws.title}' is empty!")
         st.stop()
     
+    st.write(f"📊 Raw data rows: {len(values)}")
+    if len(values) > 0:
+        st.write(f"📋 Raw header row: {values[0]}")
+    
+    
     # Find header row
     header, *data = values
+    st.write(f"📋 Parsed header: {header}")
+    
     df = pd.DataFrame(data, columns=header)
-    df = df.map(lambda v: v.strip() if isinstance(v, str) else v)      
+    st.write(f"📊 DataFrame shape before cleaning: {df.shape}")
+    
+    df = df.map(lambda v: v.strip() if isinstance(v, str) else v)
+    
+    # Clean column names (remove extra spaces)
+    df.columns = df.columns.str.strip()
+    st.write(f"📋 Cleaned columns: {list(df.columns)}")
+    
+    # Check if 'Inception Date' exists after cleaning
+    if 'Inception Date' not in df.columns:
+        st.error(f"❌ 'Inception Date' column not found after cleaning!")
+        st.error(f"Available columns: {list(df.columns)}")
+        # Show a few sample column names to check for hidden characters
+        for i, col in enumerate(df.columns[:5]):
+            st.write(f"Column {i}: '{col}' (length: {len(col)}, repr: {repr(col)})")
+        st.stop()
+    
     for col in df.columns: 
         df[col] = pd.to_numeric(df[col], errors='ignore')
     
     df['Inception Date'] = pd.to_datetime(df['Inception Date'], errors='coerce')
-    df = df.dropna(subset=['Ticker', 'Fund', 'Inception Date'])
+    
+    # Check for required columns before filtering
+    required_cols = ['Ticker', 'Fund']
+    missing_cols = [col for col in required_cols if col not in df.columns]
+    if missing_cols:
+        st.error(f"⚠️ Missing required columns in {tab_keyword}: {missing_cols}")
+        st.stop()
+    
+    df = df.dropna(subset=['Ticker', 'Fund'])
+    st.write(f"📊 Final DataFrame shape: {df.shape}")
     return df
-
 # ─── 3) SCORING IMPLEMENTATIONS ──────────────────────────────────────────────────
 def calculate_scores_1y(df: pd.DataFrame):
     df = df.copy()
