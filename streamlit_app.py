@@ -1290,23 +1290,28 @@ def create_analytics_deep_dive_tab(df_tiered):
     
     with col2:
         st.markdown("**Tier Distribution by Category (%)**")
-    # 1) Crosstab → wide %
-        tier_by_category = (
-            pd.crosstab(df_tiered['Category'], df_tiered['Tier'], normalize='index')
-            .mul(100)
+    
+    # DEBUG: show what tier & category columns we actually have
+    st.write("df_tiered cols:", df_tiered.columns.tolist())
+    
+    # 1) Build the crosstab (wide %)
+    tier_by_category = (
+        pd.crosstab(df_tiered['Category'], df_tiered['Tier'], normalize='index')
+          .mul(100)
     )
-
+    st.write("crosstab cols:", tier_by_category.columns.tolist())
+    
     # 2) Melt into long form
-        df_long = (
-            tier_by_category
-                .reset_index()
-                .melt(
-                id_vars='Category',
-                var_name='Tier',
-                value_name='Pct'
+    df_long = (
+        tier_by_category
+          .reset_index()
+          .melt(
+             id_vars='Category',
+             var_name='Tier',
+             value_name='Pct'
           )
     )
-
+    
     # 3) Plot
     fig_stacked = px.bar(
         df_long,
@@ -1316,9 +1321,10 @@ def create_analytics_deep_dive_tab(df_tiered):
         barmode='stack',
         title="Tier Distribution by Category (%)"
     )
-
+    
     # 4) Render in bottom‑right
     st.plotly_chart(fig_stacked, use_container_width=True)
+
 
 
 
