@@ -440,14 +440,17 @@ def calculate_scores_1y(df: pd.DataFrame):
     df = df.copy()
     df = standardize_column_names(df)
     
+    st.write(f"🔢 1Y+ scoring input: {len(df)} funds")
     
     # Ensure numeric conversion for required columns
     numeric_cols = ['Total Return', 'Sharpe (1Y)', 'Sortino (1Y)', 'AUM', 'Net Expense', 'Std Dev (1Y)', 'VaR']
     df = safe_numeric_conversion(df, numeric_cols)
     
     # Validate data completeness BEFORE scoring
+    before_validation = len(df)
     df = validate_fund_data_quality(df, '1Y+')
     df['data_completeness_score'] = calculate_data_completeness_score(df, '1Y+')
+    st.write(f"🔍 1Y+ after data validation: {before_validation} → {len(df)} funds")
     
     
     # Calculate Delta only for funds with valid Total Return data
@@ -504,14 +507,17 @@ def calculate_scores_3y(df: pd.DataFrame):
     df = df.copy()
     df = standardize_column_names(df)
     
+    st.write(f"🔢 3Y+ scoring input: {len(df)} funds")
     
     numeric_cols = ['Total Return (3Y)', 'Sharpe (3Y)', 'Sortino (3Y)', 'Sharpe (1Y)', 'Sortino (1Y)', 
                    'AUM', 'Net Expense', 'Std Dev (3Y)', '2022 Return']
     df = safe_numeric_conversion(df, numeric_cols)
     
     # Validate data completeness BEFORE scoring
+    before_validation = len(df)
     df = validate_fund_data_quality(df, '3Y+')
     df['data_completeness_score'] = calculate_data_completeness_score(df, '3Y+')
+    st.write(f"🔍 3Y+ after data validation: {before_validation} → {len(df)} funds")
     
     
     df['Delta'] = df['Total Return (3Y)'] - df.groupby("Category")['Total Return (3Y)'].transform("mean")   
@@ -572,14 +578,17 @@ def calculate_scores_5y(df: pd.DataFrame):
     df = df.copy()
     df = standardize_column_names(df)
     
+    st.write(f"🔢 5Y+ scoring input: {len(df)} funds")
     
     numeric_cols = ['Total Return (5Y)', 'Sharpe (5Y)', 'Sortino (5Y)', 'Sharpe (3Y)', 'Sortino (3Y)',
                    'Sharpe (1Y)', 'Sortino (1Y)', 'AUM', 'Net Expense', 'Std Dev (5Y)', '2022 Return']
     df = safe_numeric_conversion(df, numeric_cols)
     
     # Validate data completeness BEFORE scoring
+    before_validation = len(df)
     df = validate_fund_data_quality(df, '5Y+')
     df['data_completeness_score'] = calculate_data_completeness_score(df, '5Y+')
+    st.write(f"🔍 5Y+ after data validation: {before_validation} → {len(df)} funds")
     
     
     df['Delta'] = df['Total Return (5Y)'] - df.groupby("Category")['Total Return (5Y)'].transform("mean")
@@ -926,6 +935,9 @@ def create_main_rankings_tab(df_tiered):
     with st.sidebar:
         st.header("🔍 Enhanced Filters")
         
+        # DEBUG: Show input data count
+        st.write(f"🔢 INPUT DATA: {len(df_tiered)} total funds")
+        
         # Score range filter
         if not df_tiered[~pd.isna(df_tiered['Score'])].empty:
             score_min = float(df_tiered['Score'].min())
@@ -985,9 +997,16 @@ def create_main_rankings_tab(df_tiered):
         inception_opts = st.multiselect("Inception Groups:", ["1Y+", "3Y+", "5Y+"], default=["1Y+", "3Y+", "5Y+"])
         tier_opts = st.multiselect("Tiers:", ["Tier 1", "Tier 2", "Tier 3", "No Data"], default=["Tier 1", "Tier 2", "Tier 3"])
         category_opts = st.multiselect("Categories:", sorted(df_tiered['Category'].dropna().unique()), default=sorted(df_tiered['Category'].dropna().unique()))
+        
+        # DEBUG: Show filter selections
+        st.write(f"🎯 FILTER SELECTIONS:")
+        st.write(f"Inception: {inception_opts}")
+        st.write(f"Tiers: {tier_opts}")
+        st.write(f"Categories: {len(category_opts)} selected")
     
     # Apply filters
     filtered_df = df_tiered.copy()
+    st.write(f"🚀 STARTING FILTER PIPELINE: {len(filtered_df)} funds")
     
     # Apply score range
     if score_range and not df_tiered[~pd.isna(df_tiered['Score'])].empty:
@@ -1008,14 +1027,33 @@ def create_main_rankings_tab(df_tiered):
     if selected_fund != "All Funds":
         filtered_df = filtered_df[filtered_df['Ticker'] == selected_fund]
     
-    # Apply standard filters
-    filtered_df = filtered_df[
-        filtered_df['Inception Group'].isin(inception_opts) &
-        filtered_df['Tier'].isin(tier_opts) &
-        filtered_df['Category'].isin(category_opts)
-    ]
+    # Apply standard filters with debugging
+    before_inception = len(filtered_df)
+    inception_filtered = filtered_df[filtered_df['Inception Group'].isin(inception_opts)]
+    st.write(f"📅 After inception filter: {before_inception} → {len(inception_filtered)} funds")
     
-    # Key metrics cards
+    before_tier = len(inception_filtered)
+    tier_filtered = inception_filtered[inception_filtered['Tier'].isin(tier_opts)]
+    st.write(f"🏆 After tier filter: {before_tier} → {len(tier_filtered)} funds")
+    
+    # Show what tiers are being filtered out
+    excluded_tiers = inception_filtered[~inception_filtered['Tier'].isin(tier_opts)]
+    if len(excluded_tiers) > 0:
+        excluded_tier_counts = excluded_tiers['Tier'].value_counts()
+        st.write(f"❌ EXCLUDED by tier filter: {dict(excluded_tier_counts)}")
+    
+    before_category = len(tier_filtered)
+    category_filtered = tier_filtered[tier_filtered['Category'].isin(category_opts)]
+    st.write(f"📂 After category filter: {before_category} → {len(category_filtered)} funds")
+    
+    filtered_df = category_filtered
+    st.write(f"✅ FINAL FILTERED COUNT: {len(filtered_df)} funds")
+    
+    # Show breakdown of what was filtered out
+    total_filtered_out = len(df_tiered) - len(filtered_df)
+    st.write(f"🚫 TOTAL FILTERED OUT: {total_filtered_out} funds")
+    
+    # Key metrics cards with debugging
     col1, col2, col3, col4 = st.columns(4)
     
     total_funds = len(filtered_df)
@@ -1031,6 +1069,9 @@ def create_main_rankings_tab(df_tiered):
         st.metric("Tier 2 Funds", tier2_count)
     with col4:
         st.metric("Average Score", f"{avg_score:.2f}")
+    
+    # Debug info box
+    st.info(f"🔍 DEBUGGING: Started with {len(df_tiered)} funds, displaying {total_funds} funds after filters")
     
     st.markdown("---")
     
@@ -1286,19 +1327,34 @@ def create_dashboard():
     st.write(f"📊 Total before scoring: {total_before_scoring} funds ({len(df_1y)}+{len(df_3y)}+{len(df_5y)})")
 
     scored_1y, _ = calculate_scores_1y(df_1y)
-    st.write(f"📊 After scoring 1Y+: {len(scored_1y)} funds")
+    st.write(f"📊 After calculate_scores_1y: {len(scored_1y)} funds")
     
     scored_3y, _ = calculate_scores_3y(df_3y)
-    st.write(f"📊 After scoring 3Y+: {len(scored_3y)} funds")
+    st.write(f"📊 After calculate_scores_3y: {len(scored_3y)} funds")
     
     scored_5y, _ = calculate_scores_5y(df_5y)
-    st.write(f"📊 After scoring 5Y+: {len(scored_5y)} funds")
+    st.write(f"📊 After calculate_scores_5y: {len(scored_5y)} funds")
 
     df_all = pd.concat([scored_1y, scored_3y, scored_5y], ignore_index=True)
-    st.write(f"📊 After concat: {len(df_all)} funds")
+    st.write(f"🔗 After concat df_all: {len(df_all)} funds")
+    
+    # Check for any NaN scores that might cause filtering issues
+    nan_scores = df_all['Score'].isna().sum()
+    st.write(f"🔍 Funds with NaN scores: {nan_scores}")
     
     df_tiered = assign_tiers(df_all)
-    st.write(f"📊 After tier assignment: {len(df_tiered)} funds")
+    st.write(f"🎯 After assign_tiers: {len(df_tiered)} funds")
+    
+    # CRITICAL: Check tier distribution - this might reveal the 33 missing funds
+    tier_distribution = df_tiered['Tier'].value_counts()
+    st.write(f"🏆 TIER DISTRIBUTION:")
+    st.write(tier_distribution)
+    
+    # Show sample of 'No Data' funds if they exist
+    no_data_funds = df_tiered[df_tiered['Tier'] == 'No Data']
+    if len(no_data_funds) > 0:
+        st.write(f"⚠️ 'No Data' funds sample:")
+        st.write(no_data_funds[['Ticker', 'Fund', 'Score', 'Inception Group']].head(10))
     
     # Check for duplicates that might be causing the 60→27 issue
     duplicates_check = df_all.duplicated(subset=['Ticker']).sum()
