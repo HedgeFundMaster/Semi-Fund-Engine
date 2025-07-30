@@ -73,30 +73,29 @@ def get_gspread_client():
 # ─── 2A) DATA LOADING: TAB-BASED FUND DATA  ──────────────────────────────────
 @st.cache_data(ttl=300)  # Cache for 5 minutes
 def load_inception_group(tab_keyword: str) -> pd.DataFrame:
-        client = get_gspread_client()
-        sheet = client.open_by_key(SHEET_ID)
-        ws = next ((w for w in sheet.worksheets() if tab_keyword in w.title), None)
-        if ws is None:
-            st.error("⚠️ No worksheet with '{tab_keyword}' in the title.")
-            st.stop()
-            
-            # Get all values
-            values = ws.get_all_values()
-            if not values:
-                st.error("'⚠️Worksheet '{ws.title}' is empty!")
-                st.stop()
-            
-            # Find header row
-            header, *data = values
-            df = pd.DataFrame(data, columns=header)
-            df = df.applymap(lambda v: v.strip() if isinstance(v, str) else v)      
-            for col in df.columns: 
-                df[col] = pd.to_numeric(df[col], errors='ignore')
-            
-            df['Inception Date'] = pd.to_datetime(df['Inception Date'], errors='coerce')
-            df = df.dropna(subset=['Ticker', 'Fund', 'Inception Date'])
-            return df 
-
+    client = get_gspread_client()
+    sheet = client.open_by_key(SHEET_ID)
+    ws = next((w for w in sheet.worksheets() if tab_keyword in w.title), None)
+    if ws is None:
+        st.error(f"⚠️ No worksheet with '{tab_keyword}' in the title.")
+        st.stop()
+    
+    # Get all values
+    values = ws.get_all_values()
+    if not values:
+        st.error(f"⚠️ Worksheet '{ws.title}' is empty!")
+        st.stop()
+    
+    # Find header row
+    header, *data = values
+    df = pd.DataFrame(data, columns=header)
+    df = df.map(lambda v: v.strip() if isinstance(v, str) else v)      
+    for col in df.columns: 
+        df[col] = pd.to_numeric(df[col], errors='ignore')
+    
+    df['Inception Date'] = pd.to_datetime(df['Inception Date'], errors='coerce')
+    df = df.dropna(subset=['Ticker', 'Fund', 'Inception Date'])
+    return df
 
 # ─── 3) SCORING IMPLEMENTATIONS ──────────────────────────────────────────────────
 def calculate_scores_1y(df: pd.DataFrame):
@@ -215,13 +214,14 @@ def calculate_scores_5y(df: pd.DataFrame):
 
 # ─── 3A) TIER ASSIGNMENT ─────────────────────────────────────────────────
 def assign_tiers(df: pd.DataFrame) -> pd.DataFrame:
-    def tier (score):
-        if pd.isn(score): return "No Data"
+    def tier(score):
+        if pd.isna(score): return "No Data"  # Fixed: was pd.isn(score)
         if score >= 8.5: return "Tier 1"
         if score >= 6.0: return "Tier 2"
         return "Tier 3"
-    df['Tier'] = df['Composite Score'].apply(tier)
-    return df 
+    df['Tier'] = df['Score'].apply(tier)
+    return df
+
 # ─── STYLE TIERS ────────────────────────────────────────────────
 def style_tiers(df, tier_column="Tier"):
     def color(val):
@@ -264,6 +264,9 @@ def create_dashboard():
         df_tiered['Tier'].isin(selected_tiers) &
         df_tiered['Category'].isin(selected_categories)
     ]
+
+    last_date = df_tiered["Inception Date"].max()
+    st.caption(f"📅 Last refreshed: {last_date.strftime('%Y-%m-%d')}")
 
     # 1. Top 10 Overall
     st.subheader("🥇 Top 10 Funds Overall")
