@@ -98,7 +98,7 @@ def load_inception_group(tab_keyword: str) -> pd.DataFrame:
             st.stop()
         
         # Clean header (remove spaces)
-        header = [str(col).strip() for col in header]
+        header = [str(col).strip() for col in header if str(col).strip()]
         header_len = len(header)
         
         # Process each data row to ensure consistent length
@@ -126,8 +126,8 @@ def load_inception_group(tab_keyword: str) -> pd.DataFrame:
         # Convert numeric columns safely
         for col in df.columns:
             try:
-                # Skip if column doesn't exist or is malformed
-                if col not in df.columns:
+                # Skip if column doesn't exist, is malformed, or is empty string
+                if col not in df.columns or col == '' or not col:
                     continue
                     
                 # Get the column as a pandas Series
@@ -406,7 +406,136 @@ def style_tiers(df, tier_column="Tier"):
         return ""
     return df.style.applymap(color, subset=[tier_column])
 
-# ─── 4) MAIN DASHBOARD FUNCTION ────────────────────────────────────────────
+# ─── ENHANCED EXPORT FUNCTIONS ────────────────────────────────────────────
+
+def clean_dataframe_for_export(df: pd.DataFrame, inception_group: str = None) -> pd.DataFrame:
+    """
+    Clean dataframe for export by removing unnecessary columns and filtering based on inception group
+    
+    Args:
+        df: The dataframe to clean
+        inception_group: Specific inception group to filter for ('1Y+', '3Y+', '5Y+', or None for all)
+    
+    Returns:
+        Cleaned dataframe ready for export
+    """
+    df_clean = df.copy()
+    
+    # Remove unnamed columns
+    unnamed_cols = [col for col in df_clean.columns if 'Unnamed' in str(col)]
+    df_clean = df_clean.drop(columns=unnamed_cols)
+    
+    # Remove columns with >90% missing values
+    threshold = len(df_clean) * 0.1  # At least 10% non-null values required
+    df_clean = df_clean.dropna(axis=1, thresh=threshold)
+    
+    # Define column sets for each inception group
+    base_columns = ['Ticker', 'Fund', 'Category', 'Score', 'Tier', 'Inception Group', 'Inception Date', 'AUM', 'Net Expense']
+    
+    column_sets = {
+        '1Y+': base_columns + [
+            'Total Return', 'Sharpe (1Y)', 'Sortino (1Y)', 'Std Dev (1Y)', 'VaR', 'Delta',
+            'sharpe_composite', 'sortino_composite', 'aum_score', 'expense_score'
+        ],
+        '3Y+': base_columns + [
+            'Total Return (3Y)', 'Sharpe (3Y)', 'Sortino (3Y)', 'Sharpe (1Y)', 'Sortino (1Y)',
+            'Std Dev (3Y)', '2022 Return', 'Delta', 'sharpe_composite', 'sortino_composite',
+            'aum_score', 'expense_score'
+        ],
+        '5Y+': base_columns + [
+            'Total Return (5Y)', 'Sharpe (5Y)', 'Sortino (5Y)', 'Sharpe (3Y)', 'Sortino (3Y)',
+            'Sharpe (1Y)', 'Sortino (1Y)', 'Std Dev (5Y)', '2022 Return', 'Delta',
+            'sharpe_composite', 'sortino_composite', 'aum_score', 'expense_score'
+        ]
+    }
+    
+    # Filter columns based on inception group
+    if inception_group and inception_group in column_sets:
+        # Keep only columns that exist in the dataframe and are relevant to the inception group
+        relevant_cols = [col for col in column_sets[inception_group] if col in df_clean.columns]
+        df_clean = df_clean[relevant_cols]
+    
+    # Reorder columns for better readability
+    priority_cols = ['Ticker', 'Fund', 'Category', 'Score', 'Tier', 'Inception Group']
+    other_cols = [col for col in df_clean.columns if col not in priority_cols]
+    
+    # Arrange columns with priority columns first
+    final_column_order = []
+    for col in priority_cols:
+        if col in df_clean.columns:
+            final_column_order.append(col)
+    
+    final_column_order.extend(other_cols)
+    df_clean = df_clean[final_column_order]
+    
+    # Round numeric columns to reasonable precision
+    numeric_columns = df_clean.select_dtypes(include=[np.number]).columns
+    df_clean[numeric_columns] = df_clean[numeric_columns].round(4)
+    
+    return df_clean
+
+def get_export_filename(inception_group: str = None, include_timestamp: bool = True) -> str:
+    """Generate appropriate filename for export"""
+    base_name = f"funds_{inception_group.replace('+', 'plus')}" if inception_group else "all_funds"
+    
+    if include_timestamp:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+        return f"{base_name}_{timestamp}.csv"
+    
+    return f"{base_name}.csv"
+
+@st.cache_data
+def convert_to_csv(df: pd.DataFrame) -> bytes:
+    """Convert dataframe to CSV bytes for download"""
+    return df.to_csv(index=False).encode("utf-8")
+
+def create_download_section(df_tiered: pd.DataFrame, filtered_df: pd.DataFrame, selected_inceptions: list):
+    """Create enhanced download section with multiple options"""
+    
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("📥 Download Options")
+    
+    # Add caption showing filtered data info
+    fund_count = len(filtered_df)
+    if not filtered_df.empty and 'Inception Date' in filtered_df.columns:
+        latest_inception = filtered_df['Inception Date'].max()
+        if pd.notna(latest_inception):
+            st.sidebar.caption(f"📊 {fund_count} funds | Latest inception: {latest_inception.strftime('%Y-%m-%d')}")
+        else:
+            st.sidebar.caption(f"📊 {fund_count} funds")
+    else:
+        st.sidebar.caption(f"📊 {fund_count} funds")
+    
+    # Option 1: Download filtered data (all selected inception groups combined)
+    if not filtered_df.empty:
+        cleaned_filtered = clean_dataframe_for_export(filtered_df)
+        st.sidebar.download_button(
+            "📋 Download Filtered Data",
+            data=convert_to_csv(cleaned_filtered),
+            file_name=get_export_filename(),
+            mime="text/csv",
+            help="Download currently filtered data with all selected inception groups"
+        )
+    
+    # Option 2: Download by individual inception group
+    st.sidebar.markdown("**📂 Download by Inception Group:**")
+    
+    for inception in ['1Y+', '3Y+', '5Y+']:
+        group_data = df_tiered[df_tiered['Inception Group'] == inception]
+        
+        if not group_data.empty:
+            cleaned_group = clean_dataframe_for_export(group_data, inception_group=inception)
+            fund_count_group = len(cleaned_group)
+            
+            st.sidebar.download_button(
+                f"📈 {inception} Funds ({fund_count_group})",
+                data=convert_to_csv(cleaned_group),
+                file_name=get_export_filename(inception_group=inception),
+                mime="text/csv",
+                help=f"Download all {inception} inception funds with relevant metrics only"
+            )
+
+# ─── UPDATED MAIN DASHBOARD FUNCTION ────────────────────────────────────────────
 def create_dashboard():
     st.title("🏦 Semi-Liquid Fund Selection Dashboard")
     st.markdown("---")
@@ -437,9 +566,18 @@ def create_dashboard():
         df_tiered['Category'].isin(selected_categories)
     ]
 
-    last_date = df_tiered["Inception Date"].max()
-    st.caption(f"📅 Last refreshed: {last_date.strftime('%Y-%m-%d')}")
+    # Enhanced data summary with fund count and latest inception date
+    fund_count = len(filtered_df)
+    if not filtered_df.empty and 'Inception Date' in filtered_df.columns:
+        latest_inception = filtered_df['Inception Date'].max()
+        if pd.notna(latest_inception):
+            st.caption(f"📊 Showing {fund_count} funds | Latest inception: {latest_inception.strftime('%Y-%m-%d')}")
+        else:
+            st.caption(f"📊 Showing {fund_count} funds")
+    else:
+        st.caption(f"📊 Showing {fund_count} funds")
 
+    # Rest of the dashboard code remains the same...
     # 1. Top 10 Overall
     st.subheader("🥇 Top 10 Funds Overall")
     top10 = filtered_df.sort_values("Score", ascending=False).head(10)
@@ -471,12 +609,8 @@ def create_dashboard():
     sns.heatmap(heatmap_data, annot=True, fmt=".2f", cmap="coolwarm", ax=ax)
     st.pyplot(fig)
 
-    # Download
-    @st.cache_data
-    def _convert_to_csv(df):
-        return df.to_csv(index=False).encode("utf-8")
-
-    st.sidebar.download_button("📥 Download Filtered Data", data=_convert_to_csv(filtered_df), file_name="filtered_funds.csv", mime="text/csv")
+    # Enhanced Download Section
+    create_download_section(df_tiered, filtered_df, selected_inceptions)
 
 if __name__ == "__main__":
     create_dashboard()
