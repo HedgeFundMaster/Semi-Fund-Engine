@@ -81,11 +81,11 @@ DEFAULT_TIER_THRESHOLDS = {
     "min_tier2_score": -0.5          # Minimum absolute score for Tier 2
 }
 
-# DATA COMPLETENESS REQUIREMENTS
+# DATA COMPLETENESS REQUIREMENTS - RELAXED FOR MORE FUNDS
 MIN_DATA_REQUIREMENTS = {
-    "1Y+": {"required": ["Total Return", "Sharpe (1Y)", "Sortino (1Y)"], "max_missing": 1},
-    "3Y+": {"required": ["Total Return (3Y)", "Sharpe (3Y)", "Sortino (3Y)"], "max_missing": 1},
-    "5Y+": {"required": ["Total Return (5Y)", "Sharpe (5Y)", "Sortino (5Y)"], "max_missing": 1}
+    "1Y+": {"required": ["Total Return", "Sharpe (1Y)", "Sortino (1Y)"], "max_missing": 2},
+    "3Y+": {"required": ["Total Return (3Y)", "Sharpe (3Y)", "Sortino (3Y)"], "max_missing": 2},
+    "5Y+": {"required": ["Total Return (5Y)", "Sharpe (5Y)", "Sortino (5Y)"], "max_missing": 2}
 }
 
 # SCORING METHODOLOGY FLAGS
@@ -246,19 +246,15 @@ def validate_fund_data_quality(df, inception_group):
     return df
 
 def safe_score_calculation(df, components):
-    """Calculate scores only for funds with sufficient data, NaN for others"""
-    scores = pd.Series(np.nan, index=df.index)
+    """Calculate scores for ALL funds - use data quality for tier assignment only"""
+    scores = pd.Series(0.0, index=df.index)
     
-    # Only calculate scores for funds with sufficient data
-    valid_funds = df['has_sufficient_data'] == True
-    
-    if valid_funds.any():
-        # Calculate weighted sum for valid funds only
-        for component, weight in components.items():
-            if component in df.columns:
-                # Use 0 for NaN in individual components, but only for valid funds
-                component_scores = df[component].fillna(0) * weight
-                scores[valid_funds] = scores[valid_funds].fillna(0) + component_scores[valid_funds]
+    # Calculate weighted sum for ALL funds - let tier assignment handle data quality
+    for component, weight in components.items():
+        if component in df.columns:
+            # Use 0 for NaN in individual components for all funds
+            component_scores = df[component].fillna(0) * weight
+            scores = scores + component_scores
     
     return scores
 
@@ -409,6 +405,7 @@ def calculate_scores_1y(df: pd.DataFrame):
     df = df.copy()
     df = standardize_column_names(df)
     
+    
     # Ensure numeric conversion for required columns
     numeric_cols = ['Total Return', 'Sharpe (1Y)', 'Sortino (1Y)', 'AUM', 'Net Expense', 'Std Dev (1Y)', 'VaR']
     df = safe_numeric_conversion(df, numeric_cols)
@@ -416,6 +413,7 @@ def calculate_scores_1y(df: pd.DataFrame):
     # Validate data completeness BEFORE scoring
     df = validate_fund_data_quality(df, '1Y+')
     df['data_completeness_score'] = calculate_data_completeness_score(df, '1Y+')
+    
     
     # Calculate Delta only for funds with valid Total Return data
     df['Delta'] = df['Total Return'] - df.groupby("Category")['Total Return'].transform("mean")
@@ -471,6 +469,7 @@ def calculate_scores_3y(df: pd.DataFrame):
     df = df.copy()
     df = standardize_column_names(df)
     
+    
     numeric_cols = ['Total Return (3Y)', 'Sharpe (3Y)', 'Sortino (3Y)', 'Sharpe (1Y)', 'Sortino (1Y)', 
                    'AUM', 'Net Expense', 'Std Dev (3Y)', '2022 Return']
     df = safe_numeric_conversion(df, numeric_cols)
@@ -478,6 +477,7 @@ def calculate_scores_3y(df: pd.DataFrame):
     # Validate data completeness BEFORE scoring
     df = validate_fund_data_quality(df, '3Y+')
     df['data_completeness_score'] = calculate_data_completeness_score(df, '3Y+')
+    
     
     df['Delta'] = df['Total Return (3Y)'] - df.groupby("Category")['Total Return (3Y)'].transform("mean")   
     # Calculate composite scores only using available data - avoid NaN propagation
@@ -537,6 +537,7 @@ def calculate_scores_5y(df: pd.DataFrame):
     df = df.copy()
     df = standardize_column_names(df)
     
+    
     numeric_cols = ['Total Return (5Y)', 'Sharpe (5Y)', 'Sortino (5Y)', 'Sharpe (3Y)', 'Sortino (3Y)',
                    'Sharpe (1Y)', 'Sortino (1Y)', 'AUM', 'Net Expense', 'Std Dev (5Y)', '2022 Return']
     df = safe_numeric_conversion(df, numeric_cols)
@@ -544,6 +545,7 @@ def calculate_scores_5y(df: pd.DataFrame):
     # Validate data completeness BEFORE scoring
     df = validate_fund_data_quality(df, '5Y+')
     df['data_completeness_score'] = calculate_data_completeness_score(df, '5Y+')
+    
     
     df['Delta'] = df['Total Return (5Y)'] - df.groupby("Category")['Total Return (5Y)'].transform("mean")
 
@@ -637,8 +639,8 @@ def assign_tiers(df: pd.DataFrame) -> pd.DataFrame:
         else:
             return 8.5, 6.0  # Static fallback thresholds
     
-    # Calculate dynamic thresholds from all valid scores
-    valid_scores = df[~pd.isna(df['Score']) & df.get('has_sufficient_data', True)]['Score']
+    # Calculate dynamic thresholds from all valid scores (ignore data sufficiency for scoring)
+    valid_scores = df[~pd.isna(df['Score'])]['Score']
     tier1_thresh, tier2_thresh = get_dynamic_thresholds(valid_scores)
     
     def tier(row):
@@ -824,161 +826,6 @@ def create_download_section(df_tiered: pd.DataFrame, filtered_df: pd.DataFrame, 
     return create_enhanced_download_section(df_tiered, filtered_df, selected_inceptions)
 
 # ─── DATA QUALITY DASHBOARD FUNCTIONS ────────────────────────────────────────────
-
-def create_data_quality_dashboard(df_tiered):
-    """Create comprehensive data quality dashboard"""
-    st.title("📊 Data Quality Dashboard")
-    st.markdown("---")
-    
-    # Data Quality Summary Cards
-    col1, col2, col3, col4 = st.columns(4)
-    
-    total_funds = len(df_tiered)
-    funds_with_data = df_tiered.get('has_sufficient_data', True).sum() if 'has_sufficient_data' in df_tiered.columns else total_funds
-    valid_scores = (~pd.isna(df_tiered['Score'])).sum()
-    avg_completeness = df_tiered.get('data_completeness_score', pd.Series([100]*len(df_tiered))).mean()
-    
-    with col1:
-        st.metric("Total Funds", total_funds)
-    with col2:
-        st.metric("Funds with Sufficient Data", f"{funds_with_data if isinstance(funds_with_data, int) else total_funds}")
-    with col3:
-        st.metric("Valid Scores", valid_scores)
-    with col4:
-        st.metric("Avg Data Completeness", f"{avg_completeness:.1f}%")
-    
-    # Section 1: Missing Data Analysis
-    st.subheader("🔍 Missing Data Analysis by Column")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        missing_analysis = analyze_missing_data_by_column(df_tiered)
-        if missing_analysis:
-            missing_df = pd.DataFrame(missing_analysis).T
-            missing_df = missing_df.sort_values('missing_percentage', ascending=False)
-            
-            # Create bar chart for missing data
-            fig_missing = px.bar(
-                missing_df.reset_index(), 
-                x='index', 
-                y='missing_percentage',
-                title="Missing Data by Column (%)",
-                labels={'index': 'Column', 'missing_percentage': 'Missing %'}
-            )
-            fig_missing.update_xaxis(tickangle=45)
-            st.plotly_chart(fig_missing, use_container_width=True)
-    
-    with col2:
-        if missing_analysis:
-            st.markdown("**Missing Data Summary**")
-            display_missing = missing_df[['missing_count', 'missing_percentage', 'non_missing_count']].round(2)
-            st.dataframe(display_missing, use_container_width=True)
-    
-    # Section 2: Fund-Level Data Completeness
-    st.subheader("📋 Fund-Level Data Completeness")
-    
-    # Create completeness bins
-    if 'data_completeness_score' in df_tiered.columns:
-        df_display = df_tiered[['Ticker', 'Fund', 'Category', 'Inception Group', 'data_completeness_score', 'has_sufficient_data', 'Tier']].copy()
-        df_display['Completeness_Bin'] = pd.cut(
-            df_display['data_completeness_score'], 
-            bins=[0, 50, 75, 90, 100], 
-            labels=['Poor (<50%)', 'Fair (50-75%)', 'Good (75-90%)', 'Excellent (90-100%)']
-        )
-        
-        # Completeness distribution
-        completeness_dist = df_display['Completeness_Bin'].value_counts()
-        fig_pie = px.pie(
-            values=completeness_dist.values, 
-            names=completeness_dist.index,
-            title="Data Completeness Distribution"
-        )
-        st.plotly_chart(fig_pie, use_container_width=True)
-        
-        # Fund details table with filtering
-        st.markdown("**Fund Details (Sortable)**")
-        completeness_filter = st.selectbox(
-            "Filter by Completeness Level:",
-            options=['All'] + list(df_display['Completeness_Bin'].dropna().unique())
-        )
-        
-        if completeness_filter != 'All':
-            filtered_display = df_display[df_display['Completeness_Bin'] == completeness_filter]
-        else:
-            filtered_display = df_display
-            
-        st.dataframe(filtered_display.sort_values('data_completeness_score', ascending=False), use_container_width=True)
-    
-    # Section 3: Integrity Penalty Analysis  
-    st.subheader("⚠️ Funds Flagged for Integrity Penalties")
-    
-    integrity_flags = identify_integrity_penalty_funds(df_tiered)
-    if not integrity_flags.empty:
-        st.warning(f"Found {len(integrity_flags)} funds with suspicious metrics")
-        st.dataframe(integrity_flags, use_container_width=True)
-    else:
-        st.success("No funds flagged for integrity penalties")
-    
-    # Section 4: Category-wise Data Quality
-    st.subheader("📊 Category-wise Data Quality Metrics")
-    
-    category_quality = calculate_category_data_quality(df_tiered)
-    if not category_quality.empty:
-        # Category quality chart
-        fig_cat = px.bar(
-            category_quality,
-            x='Category',
-            y='Data_Quality_Score',
-            title="Data Quality Score by Category",
-            text='Data_Quality_Score'
-        )
-        fig_cat.update_traces(texttemplate='%{text:.1f}%', textposition='outside')
-        fig_cat.update_xaxis(tickangle=45)
-        st.plotly_chart(fig_cat, use_container_width=True)
-        
-        # Category details table
-        st.dataframe(category_quality, use_container_width=True)
-    
-    # Section 5: Tier Distribution Tracking
-    st.subheader("📈 Tier Distribution Analysis")
-    
-    current_tier_dist = track_tier_distribution(df_tiered)
-    
-    # Current distribution
-    tier_df = pd.DataFrame([
-        {'Tier': 'Tier 1', 'Percentage': current_tier_dist['Tier 1']},
-        {'Tier': 'Tier 2', 'Percentage': current_tier_dist['Tier 2']},
-        {'Tier': 'Tier 3', 'Percentage': current_tier_dist['Tier 3']},
-        {'Tier': 'No Data', 'Percentage': current_tier_dist['No Data']}
-    ])
-    
-    fig_tier = px.bar(
-        tier_df,
-        x='Tier',
-        y='Percentage',
-        title="Current Tier Distribution",
-        text='Percentage'
-    )
-    fig_tier.update_traces(texttemplate='%{text:.1f}%', textposition='outside')
-    st.plotly_chart(fig_tier, use_container_width=True)
-    
-    # Store current distribution for change tracking (in session state)
-    if 'previous_tier_dist' not in st.session_state:
-        st.session_state.previous_tier_dist = current_tier_dist
-    
-    # Data Quality Alerts
-    alerts = generate_data_quality_alerts(df_tiered, st.session_state.get('previous_tier_dist'))
-    
-    if alerts:
-        st.subheader("🚨 Data Quality Alerts")
-        for alert in alerts:
-            if alert['level'] == 'error':
-                st.error(f"**{alert['message']}**\n{alert['details']}")
-            elif alert['level'] == 'warning':
-                st.warning(f"**{alert['message']}**\n{alert['details']}")
-            else:
-                st.info(f"**{alert['message']}**\n{alert['details']}")
 
 def apply_data_quality_filters(df, min_completeness=0, exclude_integrity=False, exclude_missing_critical=False, complete_aum_expense_only=False):
     """Apply data quality filters to dataframe"""
@@ -1183,6 +1030,9 @@ def create_main_rankings_tab(df_tiered):
             ]), 
             use_container_width=True
         )
+    
+    # Add download functionality
+    create_enhanced_download_section(df_tiered, filtered_df, inception_opts)
 
 def create_analytics_deep_dive_tab(df_tiered):
     """Analytics Deep Dive tab with interactive charts and analysis"""
@@ -1291,15 +1141,11 @@ def create_analytics_deep_dive_tab(df_tiered):
     with col2:
         st.markdown("**Tier Distribution by Category (%)**")
     
-    # DEBUG: show what tier & category columns we actually have
-    st.write("df_tiered cols:", df_tiered.columns.tolist())
-    
-    # 1) Build the crosstab (wide %)
+    # Build the crosstab (wide %)
     tier_by_category = (
         pd.crosstab(df_tiered['Category'], df_tiered['Tier'], normalize='index')
           .mul(100)
     )
-    st.write("crosstab cols:", tier_by_category.columns.tolist())
     
     # 2) Melt into long form
     df_long = (
@@ -1312,23 +1158,73 @@ def create_analytics_deep_dive_tab(df_tiered):
           )
     )
     
-    # 3) Plot
-    fig_stacked = px.bar(
-        df_long,
-        x='Category',
-        y='Pct',
-        color='Tier',
-        barmode='stack',
-        title="Tier Distribution by Category (%)"
-    )
+    # 3) Plot with error handling
+    try:
+        fig_stacked = px.bar(
+            df_long,
+            x='Category',
+            y='Pct',
+            color='Tier',
+            barmode='stack',
+            title="Tier Distribution by Category (%)"
+        )
+        
+        # 4) Render in bottom‑right (inside col2)
+        st.plotly_chart(fig_stacked, use_container_width=True)
+    except Exception as e:
+        st.error(f"Error creating tier distribution chart: {str(e)}")
+        st.info("Chart creation failed - check data availability")
+
+def create_basic_data_quality_tab(df_tiered):
+    """Basic Data Quality tab with essential metrics only"""
+    st.title("🛡️ Data Quality Overview")
     
-    # 4) Render in bottom‑right
-    st.plotly_chart(fig_stacked, use_container_width=True)
+    # Key metrics cards
+    col1, col2, col3, col4 = st.columns(4)
+    
+    total_funds = len(df_tiered)
+    funds_with_data = df_tiered.get('has_sufficient_data', True).sum() if 'has_sufficient_data' in df_tiered.columns else total_funds
+    valid_scores = (~pd.isna(df_tiered['Score'])).sum()
+    avg_completeness = df_tiered.get('data_completeness_score', pd.Series([100]*len(df_tiered))).mean()
+    
+    with col1:
+        st.metric("Total Funds", total_funds)
+    with col2:
+        st.metric("Funds with Data", f"{funds_with_data if isinstance(funds_with_data, int) else total_funds}")
+    with col3:
+        st.metric("Valid Scores", valid_scores)
+    with col4:
+        st.metric("Avg Completeness", f"{avg_completeness:.1f}%")
+    
+    st.markdown("---")
+    
+    # Simple tier distribution chart
+    st.subheader("📊 Tier Distribution")
+    try:
+        tier_counts = df_tiered['Tier'].value_counts()
+        if not tier_counts.empty:
+            fig_tier = px.bar(
+                x=tier_counts.index,
+                y=tier_counts.values,
+                title="Fund Distribution by Tier",
+                labels={'x': 'Tier', 'y': 'Number of Funds'}
+            )
+            st.plotly_chart(fig_tier, use_container_width=True)
+        else:
+            st.info("No tier data available")
+    except Exception as e:
+        st.error(f"Error creating tier chart: {str(e)}")
+    
+    # Basic data table
+    st.subheader("📋 Fund Data Summary")
+    if not df_tiered.empty:
+        display_cols = ['Ticker', 'Fund', 'Category', 'Score', 'Tier', 'Inception Group']
+        available_cols = [col for col in display_cols if col in df_tiered.columns]
+        st.dataframe(df_tiered[available_cols].head(20), use_container_width=True)
+    else:
+        st.info("No data available")
 
-
-
-
-# ─── UPDATED MAIN DASHBOARD FUNCTION ────────────────────────────────────────────
+# ─── SIMPLIFIED DASHBOARD FUNCTION (STABLE VERSION) ────────────────────────────────────────────
 def create_dashboard():
     # Load and process data (shared across tabs)
     df_1y = load_inception_group("1Y+ Inception Funds"); df_1y['Inception Group'] = '1Y+'
@@ -1342,21 +1238,37 @@ def create_dashboard():
     df_all = pd.concat([scored_1y, scored_3y, scored_5y], ignore_index=True)
     df_tiered = assign_tiers(df_all)
     
-    # Enhanced tabbed interface
-    tab1, tab2, tab3 = st.tabs([
-        "🏆 Main Rankings", 
-        "📈 Analytics Deep Dive", 
-        "🛡️ Data Quality"
+    # Fund count validation summary
+    total_loaded = len(df_tiered)
+    funds_with_scores = (~pd.isna(df_tiered['Score'])).sum()
+    tier_counts = df_tiered['Tier'].value_counts()
+    
+    # Display tier thresholds used
+    tier1_thresh = df_tiered['tier1_threshold'].iloc[0] if 'tier1_threshold' in df_tiered.columns else 'N/A'
+    tier2_thresh = df_tiered['tier2_threshold'].iloc[0] if 'tier2_threshold' in df_tiered.columns else 'N/A'
+    
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("📊 Fund Count Summary")
+    st.sidebar.metric("Total Loaded", total_loaded)
+    st.sidebar.metric("With Scores", funds_with_scores)
+    for tier, count in tier_counts.items():
+        st.sidebar.metric(f"{tier}", count)
+    
+    st.sidebar.markdown("**🎯 Tier Thresholds**")
+    st.sidebar.text(f"Tier 1: ≥ {tier1_thresh:.2f}" if isinstance(tier1_thresh, (int, float)) else f"Tier 1: {tier1_thresh}")
+    st.sidebar.text(f"Tier 2: ≥ {tier2_thresh:.2f}" if isinstance(tier2_thresh, (int, float)) else f"Tier 2: {tier2_thresh}")
+    
+    # Simplified tabbed interface for stability
+    tab1, tab2 = st.tabs([
+        "🏆 Main Dashboard", 
+        "🛡️ Data Quality (Basic)"
     ])
     
     with tab1:
         create_main_rankings_tab(df_tiered)
     
     with tab2:
-        create_analytics_deep_dive_tab(df_tiered)
-    
-    with tab3:
-        create_data_quality_dashboard(df_tiered)
+        create_basic_data_quality_tab(df_tiered)
 
 # ─── LEGACY FUNCTION - REMOVED (replaced by tabbed interface) ───
 
