@@ -2,7 +2,6 @@
 import streamlit as st
 st.set_page_config(page_title="Fund Dashboard", layout="wide")
 
-st.write("✅ App code loaded")    # ← add this, redeploy, and look for it in the UI
 
 import logging
 logging.basicConfig(level=logging.DEBUG)
@@ -81,11 +80,11 @@ DEFAULT_TIER_THRESHOLDS = {
     "min_tier2_score": -0.5          # Minimum absolute score for Tier 2
 }
 
-# DATA COMPLETENESS REQUIREMENTS - RELAXED FOR MORE FUNDS
+# DATA COMPLETENESS REQUIREMENTS - VERY RELAXED FOR MORE FUNDS
 MIN_DATA_REQUIREMENTS = {
-    "1Y+": {"required": ["Total Return", "Sharpe (1Y)", "Sortino (1Y)"], "max_missing": 2},
-    "3Y+": {"required": ["Total Return (3Y)", "Sharpe (3Y)", "Sortino (3Y)"], "max_missing": 2},
-    "5Y+": {"required": ["Total Return (5Y)", "Sharpe (5Y)", "Sortino (5Y)"], "max_missing": 2}
+    "1Y+": {"required": ["Total Return", "Sharpe (1Y)", "Sortino (1Y)"], "max_missing": 3},
+    "3Y+": {"required": ["Total Return (3Y)", "Sharpe (3Y)", "Sortino (3Y)"], "max_missing": 3},
+    "5Y+": {"required": ["Total Return (5Y)", "Sharpe (5Y)", "Sortino (5Y)"], "max_missing": 3}
 }
 
 # SCORING METHODOLOGY FLAGS
@@ -106,18 +105,9 @@ def load_inception_group(tab_keyword: str) -> pd.DataFrame:
         st.error(f"Available sheets: {all_worksheets}")
         st.stop()
     
-    st.write(f"🔍 DEBUG: Loading worksheet '{ws.title}' for {tab_keyword}")
-    
     try:
         # Get all values as a list of lists
         raw_values = ws.get_all_values()
-        st.write(f"🔍 DEBUG: Raw values from sheet: {len(raw_values)} total rows")
-        
-        # Show raw data sample
-        if len(raw_values) > 1:
-            st.write(f"🔍 DEBUG: First few raw rows:")
-            for i, row in enumerate(raw_values[:3]):
-                st.write(f"Row {i}: {row[:10]}...")  # First 10 columns
         
         if not raw_values:
             st.error(f"⚠️ Worksheet '{ws.title}' is empty!")
@@ -126,23 +116,17 @@ def load_inception_group(tab_keyword: str) -> pd.DataFrame:
         # Separate header and data
         header = raw_values[0]
         data_rows = raw_values[1:]
-        st.write(f"🔍 DEBUG: Header row: {len(header)} columns")
-        st.write(f"🔍 DEBUG: Data rows from sheet: {len(data_rows)} rows")
         
         if not data_rows:
             st.error(f"⚠️ No data rows found in '{ws.title}'!")
             st.stop()
         
         # Clean header (remove spaces)
-        original_header_len = len(header)
         header = [str(col).strip() for col in header if str(col).strip()]
         header_len = len(header)
-        st.write(f"🔍 DEBUG: Header cleaned: {original_header_len} → {header_len} columns")
-        st.write(f"🔍 DEBUG: Header columns: {header[:10]}...")  # Show first 10 columns
         
         # Process each data row to ensure consistent length
         processed_data = []
-        rows_before_processing = len(data_rows)
         
         for i, row in enumerate(data_rows):
             # Convert all values to strings first, then clean
@@ -158,15 +142,11 @@ def load_inception_group(tab_keyword: str) -> pd.DataFrame:
             
             processed_data.append(clean_row)
         
-        st.write(f"🔍 DEBUG: Processed data: {rows_before_processing} → {len(processed_data)} rows")
-        
         # Create DataFrame from processed data
         df = pd.DataFrame(processed_data, columns=header)
-        st.write(f"🔍 DEBUG: DataFrame created: {df.shape} (rows, cols)")
         
         # Replace empty strings with None for proper NaN handling
         df = df.replace('', None)
-        st.write(f"🔍 DEBUG: After replacing empty strings: {df.shape}")
         
         # Convert numeric columns safely
         for col in df.columns:
@@ -204,26 +184,13 @@ def load_inception_group(tab_keyword: str) -> pd.DataFrame:
             st.error(f"⚠️ Missing required columns in {tab_keyword}: {missing_cols}")
             st.stop()
         
-        st.write(f"🔍 DEBUG: Before dropna operations: {df.shape}")
-        
         # Remove rows where both Ticker and Fund are missing
-        df_before_ticker_fund_drop = len(df)
         df = df.dropna(subset=required_cols, how='all')
-        st.write(f"🔍 DEBUG: After dropna(Ticker+Fund): {df_before_ticker_fund_drop} → {len(df)} rows")
         
         # Remove completely empty rows
-        df_before_empty_drop = len(df)
         df = df.dropna(how='all')
-        st.write(f"🔍 DEBUG: After dropna(all empty): {df_before_empty_drop} → {len(df)} rows")
         
-        # Show sample of actual data
-        st.write(f"🔍 DEBUG: Sample data (first 3 rows):")
-        if len(df) > 0:
-            sample_cols = ['Ticker', 'Fund'] + [col for col in df.columns if col not in ['Ticker', 'Fund']][:5]
-            available_sample_cols = [col for col in sample_cols if col in df.columns]
-            st.write(df[available_sample_cols].head(3))
-        
-        st.write(f"🔍 DEBUG: FINAL {tab_keyword} DataFrame: {df.shape} - returning {len(df)} funds")
+        st.write(f"📊 Loaded {tab_keyword}: {len(df)} funds")
         return df
         
     except Exception as e:
@@ -440,17 +407,13 @@ def calculate_scores_1y(df: pd.DataFrame):
     df = df.copy()
     df = standardize_column_names(df)
     
-    st.write(f"🔢 1Y+ scoring input: {len(df)} funds")
-    
     # Ensure numeric conversion for required columns
     numeric_cols = ['Total Return', 'Sharpe (1Y)', 'Sortino (1Y)', 'AUM', 'Net Expense', 'Std Dev (1Y)', 'VaR']
     df = safe_numeric_conversion(df, numeric_cols)
     
     # Validate data completeness BEFORE scoring
-    before_validation = len(df)
     df = validate_fund_data_quality(df, '1Y+')
     df['data_completeness_score'] = calculate_data_completeness_score(df, '1Y+')
-    st.write(f"🔍 1Y+ after data validation: {before_validation} → {len(df)} funds")
     
     
     # Calculate Delta only for funds with valid Total Return data
@@ -507,17 +470,13 @@ def calculate_scores_3y(df: pd.DataFrame):
     df = df.copy()
     df = standardize_column_names(df)
     
-    st.write(f"🔢 3Y+ scoring input: {len(df)} funds")
-    
     numeric_cols = ['Total Return (3Y)', 'Sharpe (3Y)', 'Sortino (3Y)', 'Sharpe (1Y)', 'Sortino (1Y)', 
                    'AUM', 'Net Expense', 'Std Dev (3Y)', '2022 Return']
     df = safe_numeric_conversion(df, numeric_cols)
     
     # Validate data completeness BEFORE scoring
-    before_validation = len(df)
     df = validate_fund_data_quality(df, '3Y+')
     df['data_completeness_score'] = calculate_data_completeness_score(df, '3Y+')
-    st.write(f"🔍 3Y+ after data validation: {before_validation} → {len(df)} funds")
     
     
     df['Delta'] = df['Total Return (3Y)'] - df.groupby("Category")['Total Return (3Y)'].transform("mean")   
@@ -578,17 +537,13 @@ def calculate_scores_5y(df: pd.DataFrame):
     df = df.copy()
     df = standardize_column_names(df)
     
-    st.write(f"🔢 5Y+ scoring input: {len(df)} funds")
-    
     numeric_cols = ['Total Return (5Y)', 'Sharpe (5Y)', 'Sortino (5Y)', 'Sharpe (3Y)', 'Sortino (3Y)',
                    'Sharpe (1Y)', 'Sortino (1Y)', 'AUM', 'Net Expense', 'Std Dev (5Y)', '2022 Return']
     df = safe_numeric_conversion(df, numeric_cols)
     
     # Validate data completeness BEFORE scoring
-    before_validation = len(df)
     df = validate_fund_data_quality(df, '5Y+')
     df['data_completeness_score'] = calculate_data_completeness_score(df, '5Y+')
-    st.write(f"🔍 5Y+ after data validation: {before_validation} → {len(df)} funds")
     
     
     df['Delta'] = df['Total Return (5Y)'] - df.groupby("Category")['Total Return (5Y)'].transform("mean")
@@ -689,10 +644,10 @@ def assign_tiers(df: pd.DataFrame) -> pd.DataFrame:
     
     def tier(row):
         score = row['Score']
-        has_data = row.get('has_sufficient_data', True)
         
-        # Mark funds with insufficient data as 'No Data'
-        if not has_data or pd.isna(score):
+        # Only mark as 'No Data' if score is truly missing (NaN)
+        # Allow funds with any valid score to be tiered
+        if pd.isna(score):
             return "No Data"
             
         # Use dynamic thresholds
@@ -935,8 +890,6 @@ def create_main_rankings_tab(df_tiered):
     with st.sidebar:
         st.header("🔍 Enhanced Filters")
         
-        # DEBUG: Show input data count
-        st.write(f"🔢 INPUT DATA: {len(df_tiered)} total funds")
         
         # Score range filter
         if not df_tiered[~pd.isna(df_tiered['Score'])].empty:
@@ -995,18 +948,12 @@ def create_main_rankings_tab(df_tiered):
         # Standard filters
         st.markdown("---")
         inception_opts = st.multiselect("Inception Groups:", ["1Y+", "3Y+", "5Y+"], default=["1Y+", "3Y+", "5Y+"])
-        tier_opts = st.multiselect("Tiers:", ["Tier 1", "Tier 2", "Tier 3", "No Data"], default=["Tier 1", "Tier 2", "Tier 3"])
+        tier_opts = st.multiselect("Tiers:", ["Tier 1", "Tier 2", "Tier 3", "No Data"], default=["Tier 1", "Tier 2", "Tier 3", "No Data"])
         category_opts = st.multiselect("Categories:", sorted(df_tiered['Category'].dropna().unique()), default=sorted(df_tiered['Category'].dropna().unique()))
         
-        # DEBUG: Show filter selections
-        st.write(f"🎯 FILTER SELECTIONS:")
-        st.write(f"Inception: {inception_opts}")
-        st.write(f"Tiers: {tier_opts}")
-        st.write(f"Categories: {len(category_opts)} selected")
     
     # Apply filters
     filtered_df = df_tiered.copy()
-    st.write(f"🚀 STARTING FILTER PIPELINE: {len(filtered_df)} funds")
     
     # Apply score range
     if score_range and not df_tiered[~pd.isna(df_tiered['Score'])].empty:
@@ -1027,33 +974,12 @@ def create_main_rankings_tab(df_tiered):
     if selected_fund != "All Funds":
         filtered_df = filtered_df[filtered_df['Ticker'] == selected_fund]
     
-    # Apply standard filters with debugging
-    before_inception = len(filtered_df)
-    inception_filtered = filtered_df[filtered_df['Inception Group'].isin(inception_opts)]
-    st.write(f"📅 After inception filter: {before_inception} → {len(inception_filtered)} funds")
+    # Apply standard filters
+    filtered_df = filtered_df[filtered_df['Inception Group'].isin(inception_opts)]
+    filtered_df = filtered_df[filtered_df['Tier'].isin(tier_opts)]
+    filtered_df = filtered_df[filtered_df['Category'].isin(category_opts)]
     
-    before_tier = len(inception_filtered)
-    tier_filtered = inception_filtered[inception_filtered['Tier'].isin(tier_opts)]
-    st.write(f"🏆 After tier filter: {before_tier} → {len(tier_filtered)} funds")
-    
-    # Show what tiers are being filtered out
-    excluded_tiers = inception_filtered[~inception_filtered['Tier'].isin(tier_opts)]
-    if len(excluded_tiers) > 0:
-        excluded_tier_counts = excluded_tiers['Tier'].value_counts()
-        st.write(f"❌ EXCLUDED by tier filter: {dict(excluded_tier_counts)}")
-    
-    before_category = len(tier_filtered)
-    category_filtered = tier_filtered[tier_filtered['Category'].isin(category_opts)]
-    st.write(f"📂 After category filter: {before_category} → {len(category_filtered)} funds")
-    
-    filtered_df = category_filtered
-    st.write(f"✅ FINAL FILTERED COUNT: {len(filtered_df)} funds")
-    
-    # Show breakdown of what was filtered out
-    total_filtered_out = len(df_tiered) - len(filtered_df)
-    st.write(f"🚫 TOTAL FILTERED OUT: {total_filtered_out} funds")
-    
-    # Key metrics cards with debugging
+    # Key metrics cards
     col1, col2, col3, col4 = st.columns(4)
     
     total_funds = len(filtered_df)
@@ -1069,9 +995,6 @@ def create_main_rankings_tab(df_tiered):
         st.metric("Tier 2 Funds", tier2_count)
     with col4:
         st.metric("Average Score", f"{avg_score:.2f}")
-    
-    # Debug info box
-    st.info(f"🔍 DEBUGGING: Started with {len(df_tiered)} funds, displaying {total_funds} funds after filters")
     
     st.markdown("---")
     
@@ -1312,59 +1235,21 @@ def create_dashboard():
     st.sidebar.markdown("---")
     
     # Load and process data (shared across tabs)
-    st.write("🔄 LOADING DATA FROM GOOGLE SHEETS...")
-    
-    df_1y = load_inception_group("1Y+ Inception Funds"); df_1y['Inception Group'] = '1Y+'
-    st.write(f"📊 After loading 1Y+: {len(df_1y)} funds")
-    
-    df_3y = load_inception_group("3Y+ Inception Funds"); df_3y['Inception Group'] = '3Y+'
-    st.write(f"📊 After loading 3Y+: {len(df_3y)} funds")
-    
-    df_5y = load_inception_group("5Y+ Inception Funds"); df_5y['Inception Group'] = '5Y+'
-    st.write(f"📊 After loading 5Y+: {len(df_5y)} funds")
-    
-    total_before_scoring = len(df_1y) + len(df_3y) + len(df_5y)
-    st.write(f"📊 Total before scoring: {total_before_scoring} funds ({len(df_1y)}+{len(df_3y)}+{len(df_5y)})")
+    with st.spinner("Loading data from Google Sheets..."):
+        df_1y = load_inception_group("1Y+ Inception Funds"); df_1y['Inception Group'] = '1Y+'
+        df_3y = load_inception_group("3Y+ Inception Funds"); df_3y['Inception Group'] = '3Y+'
+        df_5y = load_inception_group("5Y+ Inception Funds"); df_5y['Inception Group'] = '5Y+'
 
-    scored_1y, _ = calculate_scores_1y(df_1y)
-    st.write(f"📊 After calculate_scores_1y: {len(scored_1y)} funds")
-    
-    scored_3y, _ = calculate_scores_3y(df_3y)
-    st.write(f"📊 After calculate_scores_3y: {len(scored_3y)} funds")
-    
-    scored_5y, _ = calculate_scores_5y(df_5y)
-    st.write(f"📊 After calculate_scores_5y: {len(scored_5y)} funds")
+        scored_1y, _ = calculate_scores_1y(df_1y)
+        scored_3y, _ = calculate_scores_3y(df_3y)
+        scored_5y, _ = calculate_scores_5y(df_5y)
 
-    df_all = pd.concat([scored_1y, scored_3y, scored_5y], ignore_index=True)
-    st.write(f"🔗 After concat df_all: {len(df_all)} funds")
+        df_all = pd.concat([scored_1y, scored_3y, scored_5y], ignore_index=True)
+        df_tiered = assign_tiers(df_all)
     
-    # Check for any NaN scores that might cause filtering issues
-    nan_scores = df_all['Score'].isna().sum()
-    st.write(f"🔍 Funds with NaN scores: {nan_scores}")
-    
-    df_tiered = assign_tiers(df_all)
-    st.write(f"🎯 After assign_tiers: {len(df_tiered)} funds")
-    
-    # CRITICAL: Check tier distribution - this might reveal the 33 missing funds
+    # Show tier distribution for user awareness
     tier_distribution = df_tiered['Tier'].value_counts()
-    st.write(f"🏆 TIER DISTRIBUTION:")
-    st.write(tier_distribution)
-    
-    # Show sample of 'No Data' funds if they exist
-    no_data_funds = df_tiered[df_tiered['Tier'] == 'No Data']
-    if len(no_data_funds) > 0:
-        st.write(f"⚠️ 'No Data' funds sample:")
-        st.write(no_data_funds[['Ticker', 'Fund', 'Score', 'Inception Group']].head(10))
-    
-    # Check for duplicates that might be causing the 60→27 issue
-    duplicates_check = df_all.duplicated(subset=['Ticker']).sum()
-    unique_tickers = df_all['Ticker'].nunique()
-    st.write(f"🔍 DUPLICATE CHECK: {duplicates_check} duplicates found, {unique_tickers} unique tickers")
-    
-    if duplicates_check > 0:
-        st.write("⚠️ DUPLICATE TICKERS FOUND:")
-        duplicate_tickers = df_all[df_all.duplicated(subset=['Ticker'], keep=False)]
-        st.write(duplicate_tickers[['Ticker', 'Inception Group']].sort_values('Ticker'))
+    st.success(f"✅ Loaded {len(df_tiered)} funds: {dict(tier_distribution)}")
     
     st.markdown("---")
     
