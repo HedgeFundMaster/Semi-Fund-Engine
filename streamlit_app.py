@@ -18,24 +18,36 @@ from datetime import datetime, timedelta
 import plotly.express as px
 import plotly.graph_objects as go
 
+@st.cache_resource
 def get_gspread_client():
-    """Authenticate and return a gspread client using service account credentials."""
-    creds_json = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_JSON")
-    if creds_json:
-        creds_dict = json.loads(creds_json)
-        creds = Credentials.from_service_account_info(creds_dict, scopes=[
-            "https://spreadsheets.google.com/feeds",
-            "https://www.googleapis.com/auth/drive",
-        ])
-    else:
-        creds_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
-        if not creds_path or not os.path.exists(creds_path):
-            raise RuntimeError("Google credentials not found. Set GOOGLE_APPLICATION_CREDENTIALS or GOOGLE_APPLICATION_CREDENTIALS_JSON.")
-        creds = Credentials.from_service_account_file(creds_path, scopes=[
-            "https://spreadsheets.google.com/feeds",
-            "https://www.googleapis.com/auth/drive",
-        ])
-    return gspread.authorize(creds)
+    """Get authenticated Google Sheets client with caching"""
+    try:
+        # 1a) Local dev: load key from file
+        if os.path.exists("gcp_key.json"):
+            with open("gcp_key.json","r") as fp:
+                creds_dict = json.load(fp)
+        # 1b) Cloud: load from secrets.toml
+        else:
+            creds_dict = {
+                "type":                        st.secrets["type"],
+                "project_id":                  st.secrets["project_id"],
+                "private_key_id":              st.secrets["private_key_id"],
+                "private_key":                 st.secrets["private_key"],
+                "client_email":                st.secrets["client_email"],
+                "client_id":                   st.secrets["client_id"],
+                "auth_uri":                    st.secrets["auth_uri"],
+                "token_uri":                   st.secrets["token_uri"],
+                "auth_provider_x509_cert_url": st.secrets["auth_provider_x509_cert_url"],
+                "client_x509_cert_url":        st.secrets["client_x509_cert_url"],
+            }
+
+        creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
+        client = gspread.authorize(creds)
+        return client
+    except Exception as e:
+        st.error(f"🚨 Authentication failed: {str(e)}")
+        st.info("💡 Please check your Google Sheets credentials and try refreshing the page.")
+        st.stop()
 
 # ─── 1) AUTHENTICATION & CONFIGURATION ─────────────────────────────────────
 SCOPES = [
