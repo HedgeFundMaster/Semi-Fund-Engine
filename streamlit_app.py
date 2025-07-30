@@ -196,12 +196,11 @@ def standardize_column_names(df):
     return df
 
 def safe_numeric_conversion(df, columns):
-    """Safely convert columns to numeric, handling any conversion issues"""
+    """Safely convert columns to numeric, preserving NaN values for proper data quality handling"""
     for col in columns:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors='coerce')
-            # Fill NaN values with 0 for calculations
-            df[col] = df[col].fillna(0)
+            # Keep NaN values instead of filling with 0 to preserve data quality
     return df
 
 def calculate_scores_1y(df: pd.DataFrame):
@@ -212,7 +211,14 @@ def calculate_scores_1y(df: pd.DataFrame):
     numeric_cols = ['Total Return', 'Sharpe (1Y)', 'Sortino (1Y)', 'AUM', 'Net Expense', 'Std Dev (1Y)', 'VaR']
     df = safe_numeric_conversion(df, numeric_cols)
     
-    df['Delta'] = df['Total Return'] - df.groupby("Category")['Total Return'].transform("mean")
+    # Handle NaN values in calculations with proper category-aware Delta computation
+    category_means = df.groupby("Category")['Total Return'].transform("mean")
+    df['Delta'] = df['Total Return'] - category_means
+    
+    # Check for artificially high Delta scores due to poor category performance
+    df['category_avg_return'] = category_means
+    df['delta_outlier_flag'] = (df['Delta'] > df['Delta'].quantile(0.9)) & (df['category_avg_return'] < df['Total Return'].quantile(0.25))
+    
     df["sharpe_composite"] = df['Sharpe (1Y)']
     df['sortino_composite'] = df['Sortino (1Y)']
     
@@ -237,14 +243,18 @@ def calculate_scores_1y(df: pd.DataFrame):
     except:
         df['expense_score'] = 0.5  # Default fallback
     
+    # Calculate composite score with NaN handling
     df['Score'] = (
-        METRIC_WEIGHTS['sharpe_composite'] * df['sharpe_composite'] +
-        METRIC_WEIGHTS['sortino_composite'] * df['sortino_composite'] +
-        METRIC_WEIGHTS['delta'] * df['Delta'] +
-        METRIC_WEIGHTS['total_return'] * df['Total Return'] +
+        METRIC_WEIGHTS['sharpe_composite'] * df['sharpe_composite'].fillna(0) +
+        METRIC_WEIGHTS['sortino_composite'] * df['sortino_composite'].fillna(0) +
+        METRIC_WEIGHTS['delta'] * df['Delta'].fillna(0) +
+        METRIC_WEIGHTS['total_return'] * df['Total Return'].fillna(0) +
         METRIC_WEIGHTS['aum'] * df['aum_score'] +
         METRIC_WEIGHTS['expense'] * df['expense_score']
     )
+    
+    # Apply penalty for funds with artificially high Delta scores due to poor category performance
+    df.loc[df['delta_outlier_flag'], 'Score'] -= 0.2
     
     if 'Sharpe (1Y)' in df.columns:
         df.loc[df['Sharpe (1Y)'] > INTEGRITY_PENALTY_THRESHOLD, 'Score'] -= INTEGRITY_PENALTY_AMOUNT 
@@ -267,9 +277,16 @@ def calculate_scores_3y(df: pd.DataFrame):
                    'AUM', 'Net Expense', 'Std Dev (3Y)', '2022 Return']
     df = safe_numeric_conversion(df, numeric_cols)
     
-    df['Delta'] = df['Total Return (3Y)'] - df.groupby("Category")['Total Return (3Y)'].transform("mean")   
-    df['sharpe_composite'] = 0.5 * df['Sharpe (3Y)'] + 0.5 * df['Sharpe (1Y)']
-    df['sortino_composite'] = 0.5 * df['Sortino (3Y)'] + 0.5 * df['Sortino (1Y)']
+    # Handle NaN values in calculations with proper category-aware Delta computation
+    category_means = df.groupby("Category")['Total Return (3Y)'].transform("mean")
+    df['Delta'] = df['Total Return (3Y)'] - category_means
+    
+    # Check for artificially high Delta scores due to poor category performance
+    df['category_avg_return'] = category_means
+    df['delta_outlier_flag'] = (df['Delta'] > df['Delta'].quantile(0.9)) & (df['category_avg_return'] < df['Total Return (3Y)'].quantile(0.25))
+    
+    df['sharpe_composite'] = 0.5 * df['Sharpe (3Y)'].fillna(0) + 0.5 * df['Sharpe (1Y)'].fillna(0)
+    df['sortino_composite'] = 0.5 * df['Sortino (3Y)'].fillna(0) + 0.5 * df['Sortino (1Y)'].fillna(0)
     
     # Safe calculations
     try:
@@ -291,14 +308,18 @@ def calculate_scores_3y(df: pd.DataFrame):
     except:
         df['expense_score'] = 0.5
 
+    # Calculate composite score with NaN handling
     df['Score'] = (
         METRIC_WEIGHTS['sharpe_composite'] * df['sharpe_composite'] +
         METRIC_WEIGHTS['sortino_composite'] * df['sortino_composite'] +
-        METRIC_WEIGHTS['delta'] * df['Delta'] +
-        METRIC_WEIGHTS['total_return'] * df['Total Return (3Y)'] +
+        METRIC_WEIGHTS['delta'] * df['Delta'].fillna(0) +
+        METRIC_WEIGHTS['total_return'] * df['Total Return (3Y)'].fillna(0) +
         METRIC_WEIGHTS['aum'] * df['aum_score'] +
         METRIC_WEIGHTS['expense'] * df['expense_score']
     )
+    
+    # Apply penalty for funds with artificially high Delta scores due to poor category performance
+    df.loc[df['delta_outlier_flag'], 'Score'] -= 0.2
 
     # Penalties with safe checks
     if 'Sharpe (3Y)' in df.columns:
@@ -322,19 +343,25 @@ def calculate_scores_5y(df: pd.DataFrame):
                    'Sharpe (1Y)', 'Sortino (1Y)', 'AUM', 'Net Expense', 'Std Dev (5Y)', '2022 Return']
     df = safe_numeric_conversion(df, numeric_cols)
     
-    df['Delta'] = df['Total Return (5Y)'] - df.groupby("Category")['Total Return (5Y)'].transform("mean")
+    # Handle NaN values in calculations with proper category-aware Delta computation
+    category_means = df.groupby("Category")['Total Return (5Y)'].transform("mean")
+    df['Delta'] = df['Total Return (5Y)'] - category_means
+    
+    # Check for artificially high Delta scores due to poor category performance
+    df['category_avg_return'] = category_means
+    df['delta_outlier_flag'] = (df['Delta'] > df['Delta'].quantile(0.9)) & (df['category_avg_return'] < df['Total Return (5Y)'].quantile(0.25))
 
-    # Composite Sharpe + Sortino weighting with safe fallbacks
+    # Composite Sharpe + Sortino weighting with proper NaN handling
     df['sharpe_composite'] = (
-        0.50 * df.get('Sharpe (5Y)', 0) +
-        0.30 * df.get('Sharpe (3Y)', 0) +
-        0.20 * df.get('Sharpe (1Y)', 0)
+        0.50 * df['Sharpe (5Y)'].fillna(0) +
+        0.30 * df['Sharpe (3Y)'].fillna(0) +
+        0.20 * df['Sharpe (1Y)'].fillna(0)
     )
 
     df['sortino_composite'] = (
-        0.50 * df.get('Sortino (5Y)', 0) +
-        0.30 * df.get('Sortino (3Y)', 0) +
-        0.20 * df.get('Sortino (1Y)', 0)
+        0.50 * df['Sortino (5Y)'].fillna(0) +
+        0.30 * df['Sortino (3Y)'].fillna(0) +
+        0.20 * df['Sortino (1Y)'].fillna(0)
     )
 
     # Safe calculations
@@ -361,14 +388,18 @@ def calculate_scores_5y(df: pd.DataFrame):
     if 'Total Return (5Y)' not in df.columns:
         df['Total Return (5Y)'] = 0  # Default fallback
         
+    # Calculate composite score with NaN handling
     df['Score'] = (
         METRIC_WEIGHTS['sharpe_composite'] * df['sharpe_composite'] +
         METRIC_WEIGHTS['sortino_composite'] * df['sortino_composite'] +
-        METRIC_WEIGHTS['delta'] * df['Delta'] +
-        METRIC_WEIGHTS['total_return'] * df['Total Return (5Y)'] +
+        METRIC_WEIGHTS['delta'] * df['Delta'].fillna(0) +
+        METRIC_WEIGHTS['total_return'] * df['Total Return (5Y)'].fillna(0) +
         METRIC_WEIGHTS['aum'] * df['aum_score'] +
         METRIC_WEIGHTS['expense'] * df['expense_score']
     )
+    
+    # Apply penalty for funds with artificially high Delta scores due to poor category performance
+    df.loc[df['delta_outlier_flag'], 'Score'] -= 0.2
 
     # Penalties with safe checks
     if 'Sharpe (5Y)' in df.columns:
@@ -384,14 +415,89 @@ def calculate_scores_5y(df: pd.DataFrame):
 
     return df, None
 
+def validate_score(score, critical_metrics_present=True, min_group_score=None):
+    """Validate and adjust scores based on data quality"""
+    # Force NaN scores to bottom of rankings
+    if pd.isna(score):
+        return min_group_score if min_group_score is not None else -999
+    
+    # Force negative scores to Tier 3 range (below 6.0)
+    if score < 0:
+        return min(score, 5.9)
+    
+    # If critical metrics are missing, assign minimum score of inception group
+    if not critical_metrics_present and min_group_score is not None:
+        return min_group_score
+    
+    return score
+
+def check_missing_critical_metrics(row):
+    """Check if fund has missing critical metrics (Sharpe, Sortino, Total Return)"""
+    critical_1y = ['Sharpe (1Y)', 'Sortino (1Y)', 'Total Return']
+    critical_3y = ['Sharpe (3Y)', 'Sortino (3Y)', 'Total Return (3Y)']
+    critical_5y = ['Sharpe (5Y)', 'Sortino (5Y)', 'Total Return (5Y)']
+    
+    inception_group = row.get('Inception Group', '')
+    
+    if inception_group == '1Y+':
+        missing_critical = any(pd.isna(row.get(col, np.nan)) for col in critical_1y if col in row.index)
+    elif inception_group == '3Y+':
+        missing_critical = any(pd.isna(row.get(col, np.nan)) for col in critical_3y if col in row.index)
+    elif inception_group == '5Y+':
+        missing_critical = any(pd.isna(row.get(col, np.nan)) for col in critical_5y if col in row.index)
+    else:
+        missing_critical = True
+    
+    return missing_critical
+
+def validate_minimum_data_requirements(df):
+    """Validate funds meet minimum data requirements"""
+    df = df.copy()
+    
+    # Check for missing critical metrics and mark funds
+    df['missing_critical_data'] = df.apply(check_missing_critical_metrics, axis=1)
+    
+    # Calculate minimum scores by inception group for funds with valid data
+    valid_scores = df[~df['missing_critical_data'] & ~pd.isna(df['Score'])]
+    min_scores_by_group = valid_scores.groupby('Inception Group')['Score'].min().to_dict()
+    
+    # Apply score validation
+    for idx, row in df.iterrows():
+        inception_group = row['Inception Group']
+        min_group_score = min_scores_by_group.get(inception_group, -999)
+        critical_metrics_present = not row['missing_critical_data']
+        
+        df.at[idx, 'Score'] = validate_score(
+            row['Score'], 
+            critical_metrics_present, 
+            min_group_score
+        )
+    
+    return df
+
 # ─── 3A) TIER ASSIGNMENT ─────────────────────────────────────────────────
 def assign_tiers(df: pd.DataFrame) -> pd.DataFrame:
-    def tier(score):
-        if pd.isna(score): return "No Data"  # Fixed: was pd.isn(score)
+    """Assign tiers with enhanced data quality validation"""
+    # Apply data quality validation first
+    df = validate_minimum_data_requirements(df)
+    
+    def tier(row):
+        score = row['Score']
+        missing_critical = row.get('missing_critical_data', False)
+        
+        # Mark funds with missing critical data as 'No Data'
+        if missing_critical or pd.isna(score) or score <= -999:
+            return "No Data"
+        
+        # Force negative scores to Tier 3
+        if score < 0:
+            return "Tier 3"
+            
         if score >= 8.5: return "Tier 1"
         if score >= 6.0: return "Tier 2"
         return "Tier 3"
-    df['Tier'] = df['Score'].apply(tier)
+    
+    df['Tier'] = df.apply(tier, axis=1)
     return df
 
 # ─── STYLE TIERS ────────────────────────────────────────────────
@@ -552,6 +658,50 @@ def create_dashboard():
     df_tiered = assign_tiers(df_all)
 
     st.sidebar.header("🔍 Filters & Configuration")
+    
+    # Data Quality Monitoring Section
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("📊 Data Quality Monitor")
+    
+    # Tier distribution
+    tier_counts = df_tiered['Tier'].value_counts().sort_index()
+    total_funds = len(df_tiered)
+    
+    # Display tier distribution with percentages
+    for tier in ["Tier 1", "Tier 2", "Tier 3", "No Data"]:
+        count = tier_counts.get(tier, 0)
+        percentage = (count / total_funds * 100) if total_funds > 0 else 0
+        
+        if tier == "Tier 1":
+            st.sidebar.metric(f"🥇 {tier}", f"{count} ({percentage:.1f}%)", delta=None)
+        elif tier == "Tier 2":
+            st.sidebar.metric(f"🥈 {tier}", f"{count} ({percentage:.1f}%)", delta=None)
+        elif tier == "Tier 3":
+            st.sidebar.metric(f"🥉 {tier}", f"{count} ({percentage:.1f}%)", delta=None)
+        else:  # No Data
+            st.sidebar.metric(f"❌ {tier}", f"{count} ({percentage:.1f}%)", delta=None)
+    
+    # Data quality warnings
+    no_data_count = tier_counts.get("No Data", 0)
+    tier3_count = tier_counts.get("Tier 3", 0)
+    
+    if no_data_count > total_funds * 0.1:  # More than 10% missing data
+        st.sidebar.warning(f"⚠️ High missing data: {no_data_count} funds ({no_data_count/total_funds*100:.1f}%) lack critical metrics")
+    
+    if tier3_count > total_funds * 0.3:  # More than 30% in Tier 3
+        st.sidebar.warning(f"⚠️ Large Tier 3 population: {tier3_count} funds ({tier3_count/total_funds*100:.1f}%) in lowest tier")
+    
+    # Check for problematic funds (specific tickers mentioned in issue)
+    problematic_tickers = ['CREMX', 'XHLDX', 'REFLX', 'PNDRX', 'XHFAX', 'FORFX']
+    problematic_funds = df_tiered[df_tiered['Ticker'].isin(problematic_tickers)]
+    
+    if not problematic_funds.empty:
+        tier1_problematic = problematic_funds[problematic_funds['Tier'] == 'Tier 1']
+        if not tier1_problematic.empty:
+            st.sidebar.error(f"🚨 Data Quality Alert: {len(tier1_problematic)} known Tier 3 funds appearing in Tier 1: {', '.join(tier1_problematic['Ticker'].tolist())}")
+    
+    st.sidebar.markdown("---")
+    
     inception_opts = ["1Y+", "3Y+", "5Y+"]
     tiers_opts = ["Tier 1", "Tier 2", "Tier 3", "No Data"]
     cat_opts = sorted(df_tiered['Category'].dropna().unique())
