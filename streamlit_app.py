@@ -106,9 +106,19 @@ def load_inception_group(tab_keyword: str) -> pd.DataFrame:
         st.error(f"Available sheets: {all_worksheets}")
         st.stop()
     
+    st.write(f"🔍 DEBUG: Loading worksheet '{ws.title}' for {tab_keyword}")
+    
     try:
         # Get all values as a list of lists
         raw_values = ws.get_all_values()
+        st.write(f"🔍 DEBUG: Raw values from sheet: {len(raw_values)} total rows")
+        
+        # Show raw data sample
+        if len(raw_values) > 1:
+            st.write(f"🔍 DEBUG: First few raw rows:")
+            for i, row in enumerate(raw_values[:3]):
+                st.write(f"Row {i}: {row[:10]}...")  # First 10 columns
+        
         if not raw_values:
             st.error(f"⚠️ Worksheet '{ws.title}' is empty!")
             st.stop()
@@ -116,17 +126,24 @@ def load_inception_group(tab_keyword: str) -> pd.DataFrame:
         # Separate header and data
         header = raw_values[0]
         data_rows = raw_values[1:]
+        st.write(f"🔍 DEBUG: Header row: {len(header)} columns")
+        st.write(f"🔍 DEBUG: Data rows from sheet: {len(data_rows)} rows")
         
         if not data_rows:
             st.error(f"⚠️ No data rows found in '{ws.title}'!")
             st.stop()
         
         # Clean header (remove spaces)
+        original_header_len = len(header)
         header = [str(col).strip() for col in header if str(col).strip()]
         header_len = len(header)
+        st.write(f"🔍 DEBUG: Header cleaned: {original_header_len} → {header_len} columns")
+        st.write(f"🔍 DEBUG: Header columns: {header[:10]}...")  # Show first 10 columns
         
         # Process each data row to ensure consistent length
         processed_data = []
+        rows_before_processing = len(data_rows)
+        
         for i, row in enumerate(data_rows):
             # Convert all values to strings first, then clean
             clean_row = [str(val).strip() if val else '' for val in row]
@@ -141,11 +158,15 @@ def load_inception_group(tab_keyword: str) -> pd.DataFrame:
             
             processed_data.append(clean_row)
         
+        st.write(f"🔍 DEBUG: Processed data: {rows_before_processing} → {len(processed_data)} rows")
+        
         # Create DataFrame from processed data
         df = pd.DataFrame(processed_data, columns=header)
+        st.write(f"🔍 DEBUG: DataFrame created: {df.shape} (rows, cols)")
         
         # Replace empty strings with None for proper NaN handling
         df = df.replace('', None)
+        st.write(f"🔍 DEBUG: After replacing empty strings: {df.shape}")
         
         # Convert numeric columns safely
         for col in df.columns:
@@ -183,12 +204,26 @@ def load_inception_group(tab_keyword: str) -> pd.DataFrame:
             st.error(f"⚠️ Missing required columns in {tab_keyword}: {missing_cols}")
             st.stop()
         
+        st.write(f"🔍 DEBUG: Before dropna operations: {df.shape}")
+        
         # Remove rows where both Ticker and Fund are missing
+        df_before_ticker_fund_drop = len(df)
         df = df.dropna(subset=required_cols, how='all')
+        st.write(f"🔍 DEBUG: After dropna(Ticker+Fund): {df_before_ticker_fund_drop} → {len(df)} rows")
         
         # Remove completely empty rows
+        df_before_empty_drop = len(df)
         df = df.dropna(how='all')
+        st.write(f"🔍 DEBUG: After dropna(all empty): {df_before_empty_drop} → {len(df)} rows")
         
+        # Show sample of actual data
+        st.write(f"🔍 DEBUG: Sample data (first 3 rows):")
+        if len(df) > 0:
+            sample_cols = ['Ticker', 'Fund'] + [col for col in df.columns if col not in ['Ticker', 'Fund']][:5]
+            available_sample_cols = [col for col in sample_cols if col in df.columns]
+            st.write(df[available_sample_cols].head(3))
+        
+        st.write(f"🔍 DEBUG: FINAL {tab_keyword} DataFrame: {df.shape} - returning {len(df)} funds")
         return df
         
     except Exception as e:
@@ -1226,17 +1261,56 @@ def create_basic_data_quality_tab(df_tiered):
 
 # ─── SIMPLIFIED DASHBOARD FUNCTION (STABLE VERSION) ────────────────────────────────────────────
 def create_dashboard():
+    # Add cache control button
+    if st.sidebar.button('🔄 Refresh Data (Clear Cache)'):
+        st.cache_data.clear()
+        st.experimental_rerun()
+    
+    st.sidebar.markdown(f"**📅 Cache Status:** Active (5min TTL)")
+    st.sidebar.markdown(f"**🕒 Last Refresh:** {datetime.now().strftime('%H:%M:%S')}")
+    st.sidebar.markdown("---")
+    
     # Load and process data (shared across tabs)
+    st.write("🔄 LOADING DATA FROM GOOGLE SHEETS...")
+    
     df_1y = load_inception_group("1Y+ Inception Funds"); df_1y['Inception Group'] = '1Y+'
+    st.write(f"📊 After loading 1Y+: {len(df_1y)} funds")
+    
     df_3y = load_inception_group("3Y+ Inception Funds"); df_3y['Inception Group'] = '3Y+'
+    st.write(f"📊 After loading 3Y+: {len(df_3y)} funds")
+    
     df_5y = load_inception_group("5Y+ Inception Funds"); df_5y['Inception Group'] = '5Y+'
+    st.write(f"📊 After loading 5Y+: {len(df_5y)} funds")
+    
+    total_before_scoring = len(df_1y) + len(df_3y) + len(df_5y)
+    st.write(f"📊 Total before scoring: {total_before_scoring} funds ({len(df_1y)}+{len(df_3y)}+{len(df_5y)})")
 
     scored_1y, _ = calculate_scores_1y(df_1y)
+    st.write(f"📊 After scoring 1Y+: {len(scored_1y)} funds")
+    
     scored_3y, _ = calculate_scores_3y(df_3y)
+    st.write(f"📊 After scoring 3Y+: {len(scored_3y)} funds")
+    
     scored_5y, _ = calculate_scores_5y(df_5y)
+    st.write(f"📊 After scoring 5Y+: {len(scored_5y)} funds")
 
     df_all = pd.concat([scored_1y, scored_3y, scored_5y], ignore_index=True)
+    st.write(f"📊 After concat: {len(df_all)} funds")
+    
     df_tiered = assign_tiers(df_all)
+    st.write(f"📊 After tier assignment: {len(df_tiered)} funds")
+    
+    # Check for duplicates that might be causing the 60→27 issue
+    duplicates_check = df_all.duplicated(subset=['Ticker']).sum()
+    unique_tickers = df_all['Ticker'].nunique()
+    st.write(f"🔍 DUPLICATE CHECK: {duplicates_check} duplicates found, {unique_tickers} unique tickers")
+    
+    if duplicates_check > 0:
+        st.write("⚠️ DUPLICATE TICKERS FOUND:")
+        duplicate_tickers = df_all[df_all.duplicated(subset=['Ticker'], keep=False)]
+        st.write(duplicate_tickers[['Ticker', 'Inception Group']].sort_values('Ticker'))
+    
+    st.markdown("---")
     
     # Fund count validation summary
     total_loaded = len(df_tiered)
