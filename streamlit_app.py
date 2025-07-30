@@ -135,7 +135,8 @@ def load_inception_group(tab_keyword: str) -> pd.DataFrame:
     
     df = df.dropna(subset=['Ticker', 'Fund'])
     st.write(f"📊 Final DataFrame shape: {df.shape}")
-    return df
+    return df #fixing the return statement to return df directly
+
 # ─── 3) SCORING IMPLEMENTATIONS ──────────────────────────────────────────────────
 def standardize_column_names(df):
     """Standardize column names across different sheets"""
