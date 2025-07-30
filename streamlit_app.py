@@ -1289,18 +1289,38 @@ def create_analytics_deep_dive_tab(df_tiered):
             st.dataframe(category_stats, use_container_width=True)
     
     with col2:
-        if 'Category' in df_tiered.columns:
-            tier_by_category = pd.crosstab(df_tiered['Category'], df_tiered['Tier'], normalize='index') * 100
-            fig_stacked = px.bar(
-                tier_by_category.reset_index(),
-                x='Category',
-                y=['Tier 1', 'Tier 2', 'Tier 3', 'No Data'],
-                title="Tier Distribution by Category (%)",
-                barmode='stack'
-            )
-            fig_stacked.update_xaxis(tickangle=45)
-            fig_stacked.update_layout(height=400)
-            st.plotly_chart(fig_stacked, use_container_width=True)
+        st.markdown("**Tier Distribution by Category (%)**")
+    # 1) Crosstab → wide %
+        tier_by_category = (
+            pd.crosstab(df_tiered['Category'], df_tiered['Tier'], normalize='index')
+            .mul(100)
+    )
+
+    # 2) Melt into long form
+        df_long = (
+            tier_by_category
+                .reset_index()
+                .melt(
+                id_vars='Category',
+                var_name='Tier',
+                value_name='Pct'
+          )
+    )
+
+    # 3) Plot
+    fig_stacked = px.bar(
+        df_long,
+        x='Category',
+        y='Pct',
+        color='Tier',
+        barmode='stack',
+        title="Tier Distribution by Category (%)"
+    )
+
+    # 4) Render in bottom‑right
+    st.plotly_chart(fig_stacked, use_container_width=True)
+
+
 
 # ─── UPDATED MAIN DASHBOARD FUNCTION ────────────────────────────────────────────
 def create_dashboard():
