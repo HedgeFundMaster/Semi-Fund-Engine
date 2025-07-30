@@ -220,13 +220,47 @@ def standardize_column_names(df):
     return df
 
 def safe_numeric_conversion(df, columns):
-    """Safely convert columns to numeric, handling any conversion issues"""
+    """Safely convert columns to numeric, preserving NaN values for proper data quality handling"""
     for col in columns:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors='coerce')
-            # Fill NaN values with 0 for calculations
-            df[col] = df[col].fillna(0)
+            # Keep NaN values - do NOT fill with 0 to prevent artificial score inflation
     return df
+
+def check_data_completeness(row, inception_group):
+    """Check if a fund has sufficient data for reliable scoring using configured requirements"""
+    if inception_group not in MIN_DATA_REQUIREMENTS:
+        return False
+    
+    requirements = MIN_DATA_REQUIREMENTS[inception_group]
+    required_cols = requirements['required'] 
+    max_missing = requirements['max_missing']
+    
+    missing_count = sum(1 for col in required_cols if pd.isna(row.get(col, np.nan)))
+    return missing_count <= max_missing
+
+def validate_fund_data_quality(df, inception_group):
+    """Mark funds with insufficient data for scoring"""
+    df = df.copy()
+    df['has_sufficient_data'] = df.apply(lambda row: check_data_completeness(row, inception_group), axis=1)
+    return df
+
+def safe_score_calculation(df, components):
+    """Calculate scores only for funds with sufficient data, NaN for others"""
+    scores = pd.Series(np.nan, index=df.index)
+    
+    # Only calculate scores for funds with sufficient data
+    valid_funds = df['has_sufficient_data'] == True
+    
+    if valid_funds.any():
+        # Calculate weighted sum for valid funds only
+        for component, weight in components.items():
+            if component in df.columns:
+                # Use 0 for NaN in individual components, but only for valid funds
+                component_scores = df[component].fillna(0) * weight
+                scores[valid_funds] = scores[valid_funds].fillna(0) + component_scores[valid_funds]
+    
+    return scores
 
 def calculate_scores_1y(df: pd.DataFrame):
     df = df.copy()
@@ -236,6 +270,10 @@ def calculate_scores_1y(df: pd.DataFrame):
     numeric_cols = ['Total Return', 'Sharpe (1Y)', 'Sortino (1Y)', 'AUM', 'Net Expense', 'Std Dev (1Y)', 'VaR']
     df = safe_numeric_conversion(df, numeric_cols)
     
+    # Validate data completeness BEFORE scoring
+    df = validate_fund_data_quality(df, '1Y+')
+    
+    # Calculate Delta only for funds with valid Total Return data
     df['Delta'] = df['Total Return'] - df.groupby("Category")['Total Return'].transform("mean")
     df["sharpe_composite"] = df['Sharpe (1Y)']
     df['sortino_composite'] = df['Sortino (1Y)']
@@ -261,14 +299,16 @@ def calculate_scores_1y(df: pd.DataFrame):
     except:
         df['expense_score'] = 0.5  # Default fallback
     
-    df['Score'] = (
-        METRIC_WEIGHTS['sharpe_composite'] * df['sharpe_composite'] +
-        METRIC_WEIGHTS['sortino_composite'] * df['sortino_composite'] +
-        METRIC_WEIGHTS['delta'] * df['Delta'] +
-        METRIC_WEIGHTS['total_return'] * df['Total Return'] +
-        METRIC_WEIGHTS['aum'] * df['aum_score'] +
-        METRIC_WEIGHTS['expense'] * df['expense_score']
-    )
+    # Use safe score calculation that only scores funds with sufficient data
+    score_components = {
+        'sharpe_composite': METRIC_WEIGHTS['sharpe_composite'],
+        'sortino_composite': METRIC_WEIGHTS['sortino_composite'], 
+        'Delta': METRIC_WEIGHTS['delta'],
+        'Total Return': METRIC_WEIGHTS['total_return'],
+        'aum_score': METRIC_WEIGHTS['aum'],
+        'expense_score': METRIC_WEIGHTS['expense']
+    }
+    df['Score'] = safe_score_calculation(df, score_components)
     
     if 'Sharpe (1Y)' in df.columns:
         df.loc[df['Sharpe (1Y)'] > INTEGRITY_PENALTY_THRESHOLD, 'Score'] -= INTEGRITY_PENALTY_AMOUNT 
@@ -291,9 +331,17 @@ def calculate_scores_3y(df: pd.DataFrame):
                    'AUM', 'Net Expense', 'Std Dev (3Y)', '2022 Return']
     df = safe_numeric_conversion(df, numeric_cols)
     
+    # Validate data completeness BEFORE scoring
+    df = validate_fund_data_quality(df, '3Y+')
+    
     df['Delta'] = df['Total Return (3Y)'] - df.groupby("Category")['Total Return (3Y)'].transform("mean")   
-    df['sharpe_composite'] = 0.5 * df['Sharpe (3Y)'] + 0.5 * df['Sharpe (1Y)']
-    df['sortino_composite'] = 0.5 * df['Sortino (3Y)'] + 0.5 * df['Sortino (1Y)']
+    # Calculate composite scores only using available data - avoid NaN propagation
+    df['sharpe_composite'] = df.apply(lambda row: 
+        np.nanmean([row.get('Sharpe (3Y)', np.nan), row.get('Sharpe (1Y)', np.nan)]) 
+        if not (pd.isna(row.get('Sharpe (3Y)', np.nan)) and pd.isna(row.get('Sharpe (1Y)', np.nan))) else np.nan, axis=1)
+    df['sortino_composite'] = df.apply(lambda row: 
+        np.nanmean([row.get('Sortino (3Y)', np.nan), row.get('Sortino (1Y)', np.nan)]) 
+        if not (pd.isna(row.get('Sortino (3Y)', np.nan)) and pd.isna(row.get('Sortino (1Y)', np.nan))) else np.nan, axis=1)
     
     # Safe calculations
     try:
@@ -315,14 +363,16 @@ def calculate_scores_3y(df: pd.DataFrame):
     except:
         df['expense_score'] = 0.5
 
-    df['Score'] = (
-        METRIC_WEIGHTS['sharpe_composite'] * df['sharpe_composite'] +
-        METRIC_WEIGHTS['sortino_composite'] * df['sortino_composite'] +
-        METRIC_WEIGHTS['delta'] * df['Delta'] +
-        METRIC_WEIGHTS['total_return'] * df['Total Return (3Y)'] +
-        METRIC_WEIGHTS['aum'] * df['aum_score'] +
-        METRIC_WEIGHTS['expense'] * df['expense_score']
-    )
+    # Use safe score calculation that only scores funds with sufficient data
+    score_components = {
+        'sharpe_composite': METRIC_WEIGHTS['sharpe_composite'],
+        'sortino_composite': METRIC_WEIGHTS['sortino_composite'], 
+        'Delta': METRIC_WEIGHTS['delta'],
+        'Total Return (3Y)': METRIC_WEIGHTS['total_return'],
+        'aum_score': METRIC_WEIGHTS['aum'],
+        'expense_score': METRIC_WEIGHTS['expense']
+    }
+    df['Score'] = safe_score_calculation(df, score_components)
 
     # Penalties with safe checks
     if 'Sharpe (3Y)' in df.columns:
@@ -346,20 +396,28 @@ def calculate_scores_5y(df: pd.DataFrame):
                    'Sharpe (1Y)', 'Sortino (1Y)', 'AUM', 'Net Expense', 'Std Dev (5Y)', '2022 Return']
     df = safe_numeric_conversion(df, numeric_cols)
     
+    # Validate data completeness BEFORE scoring
+    df = validate_fund_data_quality(df, '5Y+')
+    
     df['Delta'] = df['Total Return (5Y)'] - df.groupby("Category")['Total Return (5Y)'].transform("mean")
 
-    # Composite Sharpe + Sortino weighting with safe fallbacks
-    df['sharpe_composite'] = (
-        0.50 * df.get('Sharpe (5Y)', 0) +
-        0.30 * df.get('Sharpe (3Y)', 0) +
-        0.20 * df.get('Sharpe (1Y)', 0)
-    )
-
-    df['sortino_composite'] = (
-        0.50 * df.get('Sortino (5Y)', 0) +
-        0.30 * df.get('Sortino (3Y)', 0) +
-        0.20 * df.get('Sortino (1Y)', 0)
-    )
+    # Composite Sharpe + Sortino weighting with proper NaN handling
+    def calc_weighted_composite(row, cols_weights):
+        values = []
+        weights = []
+        for col, weight in cols_weights:
+            if col in row.index and pd.notna(row[col]):
+                values.append(row[col] * weight)
+                weights.append(weight)
+        if len(values) > 0:
+            return sum(values) / sum(weights) * sum([w for c, w in cols_weights])  # Normalize back to original scale
+        return np.nan
+    
+    sharpe_components = [('Sharpe (5Y)', 0.50), ('Sharpe (3Y)', 0.30), ('Sharpe (1Y)', 0.20)]
+    sortino_components = [('Sortino (5Y)', 0.50), ('Sortino (3Y)', 0.30), ('Sortino (1Y)', 0.20)]
+    
+    df['sharpe_composite'] = df.apply(lambda row: calc_weighted_composite(row, sharpe_components), axis=1)
+    df['sortino_composite'] = df.apply(lambda row: calc_weighted_composite(row, sortino_components), axis=1)
 
     # Safe calculations
     try:
@@ -385,14 +443,16 @@ def calculate_scores_5y(df: pd.DataFrame):
     if 'Total Return (5Y)' not in df.columns:
         df['Total Return (5Y)'] = 0  # Default fallback
         
-    df['Score'] = (
-        METRIC_WEIGHTS['sharpe_composite'] * df['sharpe_composite'] +
-        METRIC_WEIGHTS['sortino_composite'] * df['sortino_composite'] +
-        METRIC_WEIGHTS['delta'] * df['Delta'] +
-        METRIC_WEIGHTS['total_return'] * df['Total Return (5Y)'] +
-        METRIC_WEIGHTS['aum'] * df['aum_score'] +
-        METRIC_WEIGHTS['expense'] * df['expense_score']
-    )
+    # Use safe score calculation that only scores funds with sufficient data
+    score_components = {
+        'sharpe_composite': METRIC_WEIGHTS['sharpe_composite'],
+        'sortino_composite': METRIC_WEIGHTS['sortino_composite'], 
+        'Delta': METRIC_WEIGHTS['delta'],
+        'Total Return (5Y)': METRIC_WEIGHTS['total_return'],
+        'aum_score': METRIC_WEIGHTS['aum'],
+        'expense_score': METRIC_WEIGHTS['expense']
+    }
+    df['Score'] = safe_score_calculation(df, score_components)
 
     # Penalties with safe checks
     if 'Sharpe (5Y)' in df.columns:
@@ -411,12 +471,47 @@ def calculate_scores_5y(df: pd.DataFrame):
 # ─── 3A) TIER ASSIGNMENT ─────────────────────────────────────────────────
 
 def assign_tiers(df: pd.DataFrame) -> pd.DataFrame:
-    def tier(score):
-        if pd.isna(score): return "No Data"  # Fixed: was pd.isn(score)
-        if score >= 8.5: return "Tier 1"
-        if score >= 6.0: return "Tier 2"
+    """Assign tiers with data completeness validation and dynamic thresholds"""
+    
+    def get_dynamic_thresholds(valid_scores):
+        """Calculate dynamic tier thresholds based on score distribution"""
+        if DYNAMIC_TIER_THRESHOLDS and len(valid_scores) > 0:
+            tier1_threshold = valid_scores.quantile(DEFAULT_TIER_THRESHOLDS['tier1_percentile'])
+            tier2_threshold = valid_scores.quantile(DEFAULT_TIER_THRESHOLDS['tier2_percentile'])
+            
+            # Apply minimum thresholds
+            tier1_threshold = max(tier1_threshold, DEFAULT_TIER_THRESHOLDS['min_tier1_score'])
+            tier2_threshold = max(tier2_threshold, DEFAULT_TIER_THRESHOLDS['min_tier2_score'])
+            
+            # Ensure separation
+            if tier1_threshold <= tier2_threshold:
+                tier1_threshold = tier2_threshold + 0.5
+                
+            return tier1_threshold, tier2_threshold
+        else:
+            return 8.5, 6.0  # Static fallback thresholds
+    
+    # Calculate dynamic thresholds from all valid scores
+    valid_scores = df[~pd.isna(df['Score']) & df.get('has_sufficient_data', True)]['Score']
+    tier1_thresh, tier2_thresh = get_dynamic_thresholds(valid_scores)
+    
+    def tier(row):
+        score = row['Score']
+        has_data = row.get('has_sufficient_data', True)
+        
+        # Mark funds with insufficient data as 'No Data'
+        if not has_data or pd.isna(score):
+            return "No Data"
+            
+        # Use dynamic thresholds
+        if score >= tier1_thresh: return "Tier 1"
+        if score >= tier2_thresh: return "Tier 2"
         return "Tier 3"
-    df['Tier'] = df['Score'].apply(tier)
+    
+    df['Tier'] = df.apply(tier, axis=1)
+    df['tier1_threshold'] = tier1_thresh
+    df['tier2_threshold'] = tier2_thresh
+    
     return df
 
 
@@ -578,6 +673,40 @@ def create_dashboard():
     df_tiered = assign_tiers(df_all)
 
     st.sidebar.header("🔍 Filters & Configuration")
+    
+    # Score Distribution Analysis & Data Quality Monitor
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("📊 Data Quality & Distribution")
+    
+    # Calculate distribution statistics
+    tier_counts = df_tiered['Tier'].value_counts()
+    total_funds = len(df_tiered)
+    valid_scores = df_tiered[~pd.isna(df_tiered['Score'])]['Score']
+    
+    # Show tier distribution
+    for tier_name in ["Tier 1", "Tier 2", "Tier 3", "No Data"]:
+        count = tier_counts.get(tier_name, 0)
+        pct = (count / total_funds * 100) if total_funds > 0 else 0
+        st.sidebar.metric(f"{tier_name}", f"{count} ({pct:.1f}%)")
+    
+    # Show dynamic thresholds if available
+    if 'tier1_threshold' in df_tiered.columns and 'tier2_threshold' in df_tiered.columns:
+        t1_thresh = df_tiered['tier1_threshold'].iloc[0] if not df_tiered.empty else 8.5
+        t2_thresh = df_tiered['tier2_threshold'].iloc[0] if not df_tiered.empty else 6.0
+        st.sidebar.info(f"🎯 Dynamic Thresholds:\\nTier 1: ≥{t1_thresh:.2f}\\nTier 2: ≥{t2_thresh:.2f}")
+    
+    # Data quality alerts
+    no_data_count = tier_counts.get("No Data", 0)
+    tier2_count = tier_counts.get("Tier 2", 0)
+    
+    if tier2_count == 0 and total_funds > 20:
+        st.sidebar.error("🚨 No Tier 2 funds detected!")
+        if len(valid_scores) > 0:
+            st.sidebar.info(f"Score range: {valid_scores.min():.2f} to {valid_scores.max():.2f}")
+    
+    if no_data_count > total_funds * 0.2:
+        st.sidebar.warning(f"⚠️ {no_data_count} funds ({no_data_count/total_funds*100:.1f}%) lack critical data")
+    
     inception_opts = ["1Y+", "3Y+", "5Y+"]
     tiers_opts = ["Tier 1", "Tier 2", "Tier 3", "No Data"]
     cat_opts = sorted(df_tiered['Category'].dropna().unique())
@@ -635,6 +764,81 @@ def create_dashboard():
     sns.heatmap(heatmap_data, annot=True, fmt=".2f", cmap="coolwarm", ax=ax)
     st.pyplot(fig)
 
+    # Score Distribution Analysis Section
+    st.subheader("📈 Score Distribution Analysis")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("**Score Distribution by Inception Group**")
+        fig_hist = px.histogram(
+            df_tiered[~pd.isna(df_tiered['Score'])], 
+            x='Score', 
+            color='Inception Group',
+            nbins=30,
+            title="Score Distribution Histogram"
+        )
+        fig_hist.add_vline(x=df_tiered['tier1_threshold'].iloc[0] if 'tier1_threshold' in df_tiered.columns else 8.5, 
+                          line_dash="dash", line_color="green", annotation_text="Tier 1")
+        fig_hist.add_vline(x=df_tiered['tier2_threshold'].iloc[0] if 'tier2_threshold' in df_tiered.columns else 6.0, 
+                          line_dash="dash", line_color="orange", annotation_text="Tier 2")
+        st.plotly_chart(fig_hist, use_container_width=True)
+    
+    with col2:
+        st.markdown("**Data Completeness Analysis**")
+        # Show data completeness by inception group
+        completeness_data = []
+        for group in ['1Y+', '3Y+', '5Y+']:
+            group_df = df_tiered[df_tiered['Inception Group'] == group]
+            if not group_df.empty:
+                total = len(group_df)
+                has_data = group_df.get('has_sufficient_data', True).sum() if 'has_sufficient_data' in group_df.columns else total
+                valid_scores = (~pd.isna(group_df['Score'])).sum()
+                
+                completeness_data.append({
+                    'Group': group,
+                    'Total Funds': total,
+                    'Sufficient Data': has_data if isinstance(has_data, int) else total,
+                    'Valid Scores': valid_scores,
+                    'Completeness %': (has_data/total*100) if isinstance(has_data, int) and total > 0 else 100
+                })
+        
+        if completeness_data:
+            completeness_df = pd.DataFrame(completeness_data)
+            st.dataframe(completeness_df, use_container_width=True)
+        
+        # Score statistics table
+        st.markdown("**Score Statistics by Group**")
+        stats_data = []
+        for group in ['1Y+', '3Y+', '5Y+']:
+            group_scores = df_tiered[(df_tiered['Inception Group'] == group) & (~pd.isna(df_tiered['Score']))]['Score']
+            if len(group_scores) > 0:
+                stats_data.append({
+                    'Group': group,
+                    'Count': len(group_scores),
+                    'Min': group_scores.min(),
+                    'Max': group_scores.max(),
+                    'Mean': group_scores.mean(),
+                    'Std': group_scores.std()
+                })
+        
+        if stats_data:
+            stats_df = pd.DataFrame(stats_data)
+            st.dataframe(stats_df.round(3), use_container_width=True)
+    
+    # Debugging section for problematic funds
+    if st.expander("🔍 Debug Problematic Funds"):
+        problematic_tickers = ['CREMX', 'XHLDX', 'REFLX', 'PNDRX', 'XHFAX', 'FORFX']
+        problematic_funds = df_tiered[df_tiered['Ticker'].isin(problematic_tickers)]
+        
+        if not problematic_funds.empty:
+            st.markdown("**Known problematic funds analysis:**")
+            debug_cols = ['Ticker', 'Fund', 'Tier', 'Score', 'Total Return', 'Sharpe (1Y)', 'Sortino (1Y)', 'has_sufficient_data']
+            available_debug_cols = [col for col in debug_cols if col in problematic_funds.columns]
+            st.dataframe(problematic_funds[available_debug_cols], use_container_width=True)
+        else:
+            st.info("No problematic funds found in current dataset.")
+    
     # Enhanced Download Section
     create_download_section(df_tiered, filtered_df, selected_inceptions)
 
