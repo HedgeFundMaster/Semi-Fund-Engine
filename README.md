@@ -1,63 +1,40 @@
-# Semi-Liquid Engine
 
-A simple web application that uses OpenAI's GPT-2 model to generate text based on a user's prompt. This project is built with Streamlit, providing a straightforward and interactive user interface.
+# 🏦 Semi-Liquid Fund Selection Engine
 
-## Features
+A 5,000-line full-stack scoring engine for institutional-grade semi-liquid alternative funds, built with Python, Streamlit, and the Google Sheets API.
 
--   **Text Generation**: Leverages the power of GPT-2 to generate creative and coherent text.
--   **Simple UI**: A clean and simple user interface built with Streamlit.
--   **Easy Setup**: A script is provided to generate the necessary secrets file.
+## 🚀 Overview
 
-## Requirements
+The Semi-Fund Engine is a dynamic, interactive dashboard that:
+- Scores semi-liquid alternative funds (1Y+, 3Y+, 5Y+) across multiple performance and risk metrics
+- Applies adaptive weight normalization for missing data
+- Penalizes funds with misleadingly high Sharpe/Sortino ratios
+- Categorizes and ranks funds by asset class (e.g., Private Credit, Infrastructure)
+- Integrates directly with Google Sheets for real-time data ingestion and scoring
+- Visualizes results with Plotly for investment team decision-making
 
--   Python 3.7+
--   An OpenAI API key
+## 📊 Key Features
+- 🔍 **Composite Scoring:** Weighted by age group, with logic for 1Y, 3Y, and 5Y funds
+- 🧠 **Sharpe Integrity Check:** Flags smoothed NAV distortions in interval funds
+- 📈 **Quartile Penalization:** Applies 2022 drawdown penalties and Std Dev bonuses
+- 🔗 **Google Sheets API Integration:** Live sync with fund-level data
+- 📊 **Category Rankings:** Top 10 funds by strategy with tiering engine (T1, T2, T3)
+- 🛠️ **Fully Customizable:** Easily extendable with Streamlit components and modular design
 
-The project dependencies are listed in the `requirements.txt` file:
--   `streamlit`
--   `openai`
--   `toml`
+## ⚙️ Tech Stack
+- `Python`, `pandas`, `NumPy`
+- `Streamlit` for UI
+- `Plotly` for visuals
+- `Google Sheets API` for fund data ingestion
+- `YAML` config and `.env` support for modular logic
 
-## Setup and Installation
+## 🧠 Sample Use Cases
+- Internal investment committee reviews
+- Fund-of-funds screening
+- SMA allocation benchmarking
+- Client-ready visual analytics
+## by: Brendan O'Sullivan | Boston College | 
 
-1.  **Clone the repository:**
-    ```bash
-    git clone <repository-url>
-    cd semi_liquid_engine
-    ```
 
-2.  **Create and activate a virtual environment:**
-    ```bash
-    python3 -m venv venv
-    source venv/bin/activate
-    ```
-
-3.  **Install the dependencies:**
-    ```bash
-    pip install -r requirements.txt
-    ```
-
-4.  **Generate the secrets file:**
-    Run the `generate_secrets.py` script to create the `.streamlit/secrets.toml` file.
-    ```bash
-    python generate_secrets.py
-    ```
-
-5.  **Add your OpenAI API key:**
-    Open the newly created `.streamlit/secrets.toml` file and replace `"YOUR_OPENAI_API_KEY"` with your actual OpenAI API key.
-
-## Usage
-
-To run the application, use the following command:
-```bash
-streamlit run streamlit_app.py
-```
-Now, open your web browser and navigate to the URL provided by Streamlit (usually `http://localhost:8501`).
-
-## Testing
-
-The `test.py` file is currently empty. Contributions to add tests for the application are welcome.
-
-## License
 
 This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
