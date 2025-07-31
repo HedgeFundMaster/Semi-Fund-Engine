@@ -53,50 +53,27 @@ st.markdown("""
 import logging
 logging.basicConfig(level=logging.DEBUG)
 
-import os, json
-import seaborn as sns
+import os
+import json
 import pandas as pd
-import gspread
-import matplotlib.pyplot as plt
 import numpy as np
+import gspread
 from google.oauth2.service_account import Credentials
-from datetime import datetime, timedelta
+from datetime import datetime
 import plotly.express as px
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-import scipy.stats as stats
-from scipy.optimize import minimize
-from scipy.cluster.hierarchy import dendrogram, linkage
+# Removed seaborn and matplotlib imports - not used in core functionality
 import warnings
 warnings.filterwarnings('ignore')
 
-# Advanced analytics imports for Phase 3
-try:
-    from sklearn.decomposition import PCA
-    from sklearn.preprocessing import StandardScaler
-    from sklearn.cluster import KMeans
-    SKLEARN_AVAILABLE = True
-except ImportError:
-    SKLEARN_AVAILABLE = False
-    st.warning("⚠️ Advanced analytics require scikit-learn. Some features may be limited.")
-
-# Professional features imports
-try:
-    from reportlab.lib.pagesizes import letter, A4
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
-    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-    from reportlab.lib.units import inch
-    from reportlab.lib import colors
-    from reportlab.graphics.shapes import Drawing
-    from reportlab.graphics.charts.barcharts import VerticalBarChart
-    from reportlab.graphics.charts.piecharts import Pie
-    REPORTLAB_AVAILABLE = True
-except ImportError:
-    REPORTLAB_AVAILABLE = False
-    
+# Basic utilities for professional features
 import io
 import base64
 import pickle
+
+# Feature availability flags
+SKLEARN_AVAILABLE = False
+# Professional features now use CSV export instead of PDF
 
 # ─── UTILITY FUNCTIONS FOR SAFE PLOTTING ─────────────────────────────────────
 
@@ -568,16 +545,37 @@ def calculate_scores_1y(df: pd.DataFrame):
     df["sharpe_composite"] = df['Sharpe (1Y)']
     df['sortino_composite'] = df['Sortino (1Y)']
     
-    # Safe AUM score calculation with error handling
+    # Safe AUM score calculation with proper NaN handling
     try:
-        aum_log = np.log1p(df['AUM'])
-        aum_min, aum_max = aum_log.min(), aum_log.max()
-        if aum_max != aum_min:
-            df['aum_score'] = (aum_log - aum_min) / (aum_max - aum_min)
+        # Handle missing AUM values
+        aum_values = df['AUM'].copy()
+        valid_aum = aum_values.dropna()
+        
+        if len(valid_aum) > 0:
+            # Log transform only valid values
+            aum_log = np.log1p(valid_aum)
+            aum_min, aum_max = aum_log.min(), aum_log.max()
+            
+            if aum_max != aum_min:
+                # Normalize valid values
+                normalized_scores = (aum_log - aum_min) / (aum_max - aum_min)
+                
+                # Assign scores back to dataframe
+                df['aum_score'] = 0.5  # Default for NaN values
+                df.loc[valid_aum.index, 'aum_score'] = normalized_scores
+            else:
+                df['aum_score'] = 0.5  # All values are the same
         else:
-            df['aum_score'] = 0.5  # Default if all AUM values are the same
-    except:
-        df['aum_score'] = 0.5  # Default fallback
+            df['aum_score'] = 0.5  # No valid AUM data
+            
+        # Data quality warning for missing AUM
+        missing_aum_count = df['AUM'].isna().sum()
+        if missing_aum_count > 0:
+            logging.warning(f"Missing AUM data for {missing_aum_count} funds - using median score of 0.5")
+            
+    except Exception as e:
+        logging.error(f"AUM score calculation failed: {e}")
+        df['aum_score'] = 0.5  # Fallback
     
     # Safe expense score calculation
     try:
@@ -635,12 +633,21 @@ def calculate_scores_3y(df: pd.DataFrame):
         np.nanmean([row.get('Sortino (3Y)', np.nan), row.get('Sortino (1Y)', np.nan)]) 
         if not (pd.isna(row.get('Sortino (3Y)', np.nan)) and pd.isna(row.get('Sortino (1Y)', np.nan))) else np.nan, axis=1)
     
-    # Safe calculations
+    # Safe AUM calculations with proper NaN handling
     try:
-        aum_log = np.log1p(df['AUM'])
-        aum_min, aum_max = aum_log.min(), aum_log.max()
-        if aum_max != aum_min:
-            df['aum_score'] = (aum_log - aum_min) / (aum_max - aum_min)
+        aum_values = df['AUM'].copy()
+        valid_aum = aum_values.dropna()
+        
+        if len(valid_aum) > 0:
+            aum_log = np.log1p(valid_aum)
+            aum_min, aum_max = aum_log.min(), aum_log.max()
+            
+            if aum_max != aum_min:
+                normalized_scores = (aum_log - aum_min) / (aum_max - aum_min)
+                df['aum_score'] = 0.5  # Default for NaN values
+                df.loc[valid_aum.index, 'aum_score'] = normalized_scores
+            else:
+                df['aum_score'] = 0.5
         else:
             df['aum_score'] = 0.5
     except:
@@ -713,12 +720,21 @@ def calculate_scores_5y(df: pd.DataFrame):
     df['sharpe_composite'] = df.apply(lambda row: calc_weighted_composite(row, sharpe_components), axis=1)
     df['sortino_composite'] = df.apply(lambda row: calc_weighted_composite(row, sortino_components), axis=1)
 
-    # Safe calculations
+    # Safe AUM calculations with proper NaN handling
     try:
-        aum_log = np.log1p(df['AUM'])
-        aum_min, aum_max = aum_log.min(), aum_log.max()
-        if aum_max != aum_min:
-            df['aum_score'] = (aum_log - aum_min) / (aum_max - aum_min)
+        aum_values = df['AUM'].copy()
+        valid_aum = aum_values.dropna()
+        
+        if len(valid_aum) > 0:
+            aum_log = np.log1p(valid_aum)
+            aum_min, aum_max = aum_log.min(), aum_log.max()
+            
+            if aum_max != aum_min:
+                normalized_scores = (aum_log - aum_min) / (aum_max - aum_min)
+                df['aum_score'] = 0.5  # Default for NaN values
+                df.loc[valid_aum.index, 'aum_score'] = normalized_scores
+            else:
+                df['aum_score'] = 0.5
         else:
             df['aum_score'] = 0.5
     except:
@@ -1000,31 +1016,33 @@ def efficient_frontier(returns, num_portfolios=100):
         portfolio_std = np.sqrt(np.dot(weights.T, np.dot(returns.cov() * TRADING_DAYS, weights)))
         return portfolio_return, portfolio_std
     
-    def minimize_volatility(weights, returns, target_return):
-        portfolio_return, portfolio_std = portfolio_stats(weights, returns)
-        return portfolio_std
-    
-    # Constraints
-    constraints = ({'type': 'eq', 'fun': lambda x: np.sum(x) - 1})
-    bounds = tuple((0, 1) for _ in range(num_assets))
-    
+    # Simple grid search optimization (replacing complex scipy optimization)
     for i, target in enumerate(target_returns):
-        # Add return constraint
-        cons = [constraints, {'type': 'eq', 'fun': lambda x, target=target: portfolio_stats(x, returns)[0] - target}]
-        
-        # Initial guess
-        x0 = np.array([1./num_assets] * num_assets)
         
         try:
-            result = minimize(minimize_volatility, x0, args=(returns, target), 
-                            method='SLSQP', bounds=bounds, constraints=cons,
-                            options={'maxiter': 1000})
+            # Simple optimization using grid search instead of scipy minimize
+            best_weights = None
+            best_vol = float('inf')
             
-            if result.success:
-                ret, vol = portfolio_stats(result.x, returns)
+            # Try multiple random weight combinations
+            for _ in range(100):
+                # Generate random weights that sum to 1
+                weights = np.random.random(num_assets)
+                weights = weights / np.sum(weights)
+                
+                # Check if constraints are satisfied
+                ret, vol = portfolio_stats(weights, returns)
+                if abs(ret - target) < 0.001 and vol < best_vol:  # Close to target return
+                    best_weights = weights
+                    best_vol = vol
+            
+            if best_weights is not None:
+                ret, vol = portfolio_stats(best_weights, returns)
                 results[0, i] = ret
                 results[1, i] = vol
                 results[2, i] = (ret - RISK_FREE_RATE) / vol
+            else:
+                results[:, i] = np.nan
         except:
             results[:, i] = np.nan
     
@@ -1063,10 +1081,12 @@ def calculate_var(returns, confidence_level=0.05, time_horizon=1):
     var_index = int(confidence_level * len(sorted_returns))
     historical_var = sorted_returns[var_index] * np.sqrt(time_horizon)
     
-    # Parametric VaR
+    # Parametric VaR using basic normal distribution approximation
     mean_return = np.mean(returns)
     std_return = np.std(returns)
-    parametric_var = stats.norm.ppf(confidence_level, mean_return, std_return) * np.sqrt(time_horizon)
+    # Use inverse normal approximation instead of scipy.stats
+    z_score = -1.645 if confidence_level == 0.05 else -2.33 if confidence_level == 0.01 else -1.96
+    parametric_var = (mean_return + z_score * std_return) * np.sqrt(time_horizon)
     
     return {
         'historical_var': historical_var,
@@ -1109,19 +1129,20 @@ def perform_factor_analysis(returns_data):
     if len(clean_data) < 10:
         return None
     
-    # Standardize the data
-    scaler = StandardScaler()
-    scaled_data = scaler.fit_transform(clean_data)
+    # Simple standardization using pandas/numpy
+    scaled_data = (clean_data - clean_data.mean()) / clean_data.std()
     
-    # PCA for factor analysis
-    pca = PCA(n_components=min(5, len(clean_data.columns)))
-    pca_result = pca.fit_transform(scaled_data)
+    # Simple correlation analysis instead of PCA
+    correlation_matrix = scaled_data.corr()
+    
+    # Calculate basic factor loadings using correlation
+    factor_loadings = correlation_matrix.iloc[:, :min(3, len(clean_data.columns))]
     
     return {
-        'explained_variance': pca.explained_variance_ratio_,
-        'components': pca.components_,
-        'factor_loadings': pca_result,
-        'feature_names': clean_data.columns.tolist()
+        'correlation_matrix': correlation_matrix,
+        'factor_loadings': factor_loadings,
+        'feature_names': clean_data.columns.tolist(),
+        'summary': 'Basic correlation analysis (advanced PCA unavailable)'
     }
 
 # ─── DATA QUALITY DASHBOARD FUNCTIONS ────────────────────────────────────────────
@@ -2088,19 +2109,28 @@ def create_analytics_deep_dive_tab(df_tiered):
             scatter_df = df_tiered[~pd.isna(df_tiered['Total Return']) & ~pd.isna(df_tiered[sharpe_col])].copy()
             
             if not scatter_df.empty:
-                fig_scatter = px.scatter(
+                # Use safe scatter plot function
+                fig_scatter, error_msg = safe_scatter_plot(
                     scatter_df,
-                    x=sharpe_col,
-                    y='Total Return',
+                    x_col=sharpe_col,
+                    y_col='Total Return',
+                    title=f"Risk-Return Analysis: Total Return vs {sharpe_col}",
                     color='Tier',
                     size='AUM',
                     hover_name='Ticker',
-                    hover_data=['Fund', 'Category', 'Score'],
-                    title=f"Risk-Return Analysis: Total Return vs {sharpe_col}",
-                    labels={sharpe_col: f'{sharpe_col} (Risk-Adjusted Return)', 'Total Return': 'Total Return (%)'}
+                    hover_data=['Fund', 'Category', 'Score']
                 )
-                fig_scatter.update_layout(height=500)
-                st.plotly_chart(fig_scatter, use_container_width=True)
+                
+                if fig_scatter is not None:
+                    fig_scatter.update_layout(height=500)
+                    st.plotly_chart(fig_scatter, use_container_width=True)
+                else:
+                    st.error(f"Could not create scatter plot: {error_msg}")
+                    # Fallback to table display
+                    display_cols = [sharpe_col, 'Total Return', 'Tier', 'Fund']
+                    available_cols = [col for col in display_cols if col in scatter_df.columns]
+                    if available_cols:
+                        st.dataframe(scatter_df[available_cols].head(20), use_container_width=True)
             else:
                 st.info("Insufficient data for risk-return analysis")
         else:
@@ -2661,6 +2691,7 @@ def create_performance_attribution_tab(df_tiered):
     
     # Main attribution analysis
     st.markdown("---")
+    st.info(f"Analysis configured for {time_horizon} time horizon using {attribution_method}")
     
     # Tab structure for different attribution views
     attr_tab1, attr_tab2, attr_tab3, attr_tab4 = st.tabs([
@@ -3292,6 +3323,9 @@ def create_portfolio_builder_tab(df_tiered):
     # Filter selected funds
     portfolio_funds = valid_funds[valid_funds['Fund Name'].isin(selected_funds)].copy()
     
+    # Display risk tolerance setting
+    st.info(f"Portfolio configured with risk tolerance: {risk_tolerance:.1f} (0=Conservative, 1=Aggressive)")
+    
     # Create portfolio optimization
     col1, col2 = st.columns([2, 1])
     
@@ -3547,18 +3581,22 @@ def create_portfolio_builder_tab(df_tiered):
         scenario_df = pd.DataFrame(scenario_results)
         st.dataframe(scenario_df.round(2), use_container_width=True, hide_index=True)
         
-        # Scenario chart
-        fig_scenario = px.scatter(
+        # Scenario chart with validation
+        fig_scenario, error_msg = safe_scatter_plot(
             scenario_df,
-            x='Portfolio Volatility (%)',
-            y='Portfolio Return (%)',
-            text='Scenario',
+            x_col='Portfolio Volatility (%)',
+            y_col='Portfolio Return (%)',
             title='Portfolio Performance Under Different Scenarios',
-            size_max=20
+            text='Scenario'
         )
-        fig_scenario.update_traces(textposition="top center")
-        fig_scenario.update_layout(height=400)
-        st.plotly_chart(fig_scenario, use_container_width=True)
+        
+        if fig_scenario is not None:
+            fig_scenario.update_traces(textposition="top center")
+            fig_scenario.update_layout(height=400)
+            st.plotly_chart(fig_scenario, use_container_width=True)
+        else:
+            st.warning(f"Could not create scenario chart: {error_msg}")
+            st.info("Scenario data is displayed in the table above.")
 
 def create_risk_analytics_tab(df_tiered):
     """Advanced Risk Analytics with Monte Carlo simulations and VaR calculations"""
@@ -3655,14 +3693,14 @@ def create_risk_analytics_tab(df_tiered):
         # Risk distribution chart
         st.markdown("#### 📈 Return vs Risk Distribution")
         
-        fig_risk_return = px.scatter(
+        fig_risk_return, error_msg = safe_scatter_plot(
             valid_funds,
-            x='Volatility (%)',
-            y='Total Return (%)',
+            x_col='Volatility (%)',
+            y_col='Total Return (%)',
+            title='Risk-Return Profile by Fund',
             size='Sharpe Ratio',
             color='Tier',
             hover_name='Fund Name',
-            title='Risk-Return Profile by Fund',
             color_discrete_map={
                 'Top Tier': '#2E8B57',
                 'High Tier': '#4682B4', 
@@ -3672,13 +3710,21 @@ def create_risk_analytics_tab(df_tiered):
             }
         )
         
-        fig_risk_return.add_hline(y=portfolio_return*100, line_dash="dash", 
-                                 annotation_text="Portfolio Average Return")
-        fig_risk_return.add_vline(x=portfolio_volatility*100, line_dash="dash", 
-                                 annotation_text="Portfolio Average Risk")
-        
-        fig_risk_return.update_layout(height=500)
-        st.plotly_chart(fig_risk_return, use_container_width=True)
+        if fig_risk_return is not None:
+            fig_risk_return.add_hline(y=portfolio_return*100, line_dash="dash", 
+                                     annotation_text="Portfolio Average Return")
+            fig_risk_return.add_vline(x=portfolio_volatility*100, line_dash="dash", 
+                                     annotation_text="Portfolio Average Risk")
+            
+            fig_risk_return.update_layout(height=500)
+            st.plotly_chart(fig_risk_return, use_container_width=True)
+        else:
+            st.error(f"Could not create risk-return scatter plot: {error_msg}")
+            st.info("Displaying fund data in table format instead:")
+            display_cols = ['Fund Name', 'Total Return (%)', 'Volatility (%)', 'Sharpe Ratio', 'Tier']
+            available_cols = [col for col in display_cols if col in valid_funds.columns]
+            if available_cols:
+                st.dataframe(valid_funds[available_cols].head(20), use_container_width=True)
         
         # Risk metrics table
         st.markdown("#### 📋 Fund Risk Metrics")
@@ -3970,29 +4016,32 @@ def create_risk_analytics_tab(df_tiered):
         st.markdown(f"#### 🎯 Stress Test Results - {selected_fund}")
         st.dataframe(stress_df.round(3), use_container_width=True, hide_index=True)
         
-        # Stress test visualization
-        fig_stress = px.scatter(
+        # Stress test visualization with validation
+        fig_stress, error_msg = safe_scatter_plot(
             stress_df,
-            x='Stressed Volatility (%)',
-            y='Stressed Return (%)',
-            text='Scenario',
+            x_col='Stressed Volatility (%)',
+            y_col='Stressed Return (%)',
             title=f'Stress Test Scenarios - {selected_fund}',
-            size_max=20
+            text='Scenario'
         )
         
-        # Add base case point
-        fig_stress.add_trace(go.Scatter(
-            x=[base_vol * 100],
-            y=[base_return * 100],
-            mode='markers',
-            marker=dict(size=15, color='green', symbol='star'),
-            name='Base Case',
-            hovertemplate='<b>Base Case</b><br>Return: %{y:.2f}%<br>Volatility: %{x:.2f}%'
-        ))
-        
-        fig_stress.update_traces(textposition="top center")
-        fig_stress.update_layout(height=500)
-        st.plotly_chart(fig_stress, use_container_width=True)
+        if fig_stress is not None:
+            # Add base case point
+            fig_stress.add_trace(go.Scatter(
+                x=[base_vol * 100],
+                y=[base_return * 100],
+                mode='markers',
+                marker=dict(size=15, color='green', symbol='star'),
+                name='Base Case',
+                hovertemplate='<b>Base Case</b><br>Return: %{y:.2f}%<br>Volatility: %{x:.2f}%'
+            ))
+            
+            fig_stress.update_traces(textposition="top center")
+            fig_stress.update_layout(height=500)
+            st.plotly_chart(fig_stress, use_container_width=True)
+        else:
+            st.error(f"Could not create stress test chart: {error_msg}")
+            st.info("Stress test data is displayed in the table above.")
         
         # Risk management recommendations
         st.markdown("#### 💡 Risk Management Recommendations")
@@ -4085,159 +4134,35 @@ def create_dashboard():
 
 # ─── PROFESSIONAL FEATURES ────────────────────────────────────────────
 
-def generate_pdf_report(df_tiered, selected_funds=None, analysis_type="comprehensive"):
-    """Generate PDF report for fund analysis"""
-    if not REPORTLAB_AVAILABLE:
-        st.error("PDF generation requires reportlab library. Please install it to use this feature.")
-        return None
-    
+def generate_csv_report(df_tiered, selected_funds=None, analysis_type="comprehensive"):
+    """Generate CSV report for fund analysis (replaces PDF functionality)"""
     try:
-        # Create buffer for PDF
-        buffer = io.BytesIO()
+        # Create comprehensive report data
+        report_data = df_tiered.copy()
         
-        # Create PDF document
-        doc = SimpleDocTemplate(buffer, pagesize=letter, topMargin=inch)
+        # Add metadata columns
+        report_data['Report_Date'] = datetime.now().strftime("%Y-%m-%d")
+        report_data['Analysis_Type'] = analysis_type
         
-        # Get styles
-        styles = getSampleStyleSheet()
-        title_style = ParagraphStyle(
-            'CustomTitle',
-            parent=styles['Heading1'],
-            fontSize=24,
-            spaceAfter=30,
-            textColor=colors.HexColor('#1f4e79')
-        )
-        
-        # Build PDF content
-        story = []
-        
-        # Title
-        story.append(Paragraph("Semi-Liquid Alternatives Fund Analysis Report", title_style))
-        story.append(Spacer(1, 12))
-        
-        # Report metadata
-        report_date = datetime.now().strftime("%B %d, %Y")
-        story.append(Paragraph(f"<b>Report Date:</b> {report_date}", styles['Normal']))
-        story.append(Paragraph(f"<b>Analysis Type:</b> {analysis_type.title()}", styles['Normal']))
-        story.append(Paragraph(f"<b>Total Funds Analyzed:</b> {len(df_tiered)}", styles['Normal']))
-        story.append(Spacer(1, 20))
-        
-        # Executive Summary
-        story.append(Paragraph("Executive Summary", styles['Heading2']))
-        
-        # Calculate summary statistics
+        # Calculate summary statistics for inclusion
         total_funds = len(df_tiered)
         scoreable_funds = df_tiered['Score'].notna().sum()
         avg_score = df_tiered['Score'].mean() if scoreable_funds > 0 else 0
         
-        tier_distribution = df_tiered['Tier'].value_counts()
-        tier1_count = tier_distribution.get('Tier 1', 0)
-        tier2_count = tier_distribution.get('Tier 2', 0)
-        tier3_count = tier_distribution.get('Tier 3', 0)
+        # Add summary as additional columns
+        report_data['Total_Funds_Analyzed'] = total_funds
+        report_data['Scoreable_Funds'] = scoreable_funds  
+        report_data['Average_Score'] = avg_score
         
-        summary_text = f"""
-        This comprehensive analysis covers {total_funds} semi-liquid alternative investment funds. 
-        Of these, {scoreable_funds} funds had sufficient data for quantitative scoring, with an 
-        average composite score of {avg_score:.2f}.
-        <br/><br/>
-        <b>Performance Tier Distribution:</b><br/>
-        • Tier 1 (Top Performers): {tier1_count} funds ({tier1_count/total_funds*100:.1f}%)<br/>
-        • Tier 2 (Strong Performers): {tier2_count} funds ({tier2_count/total_funds*100:.1f}%)<br/>
-        • Tier 3 (Below Average): {tier3_count} funds ({tier3_count/total_funds*100:.1f}%)<br/>
-        """
+        # Create CSV buffer
+        csv_buffer = io.StringIO()
+        report_data.to_csv(csv_buffer, index=False)
+        csv_buffer.seek(0)
         
-        story.append(Paragraph(summary_text, styles['Normal']))
-        story.append(Spacer(1, 20))
-        
-        # Top Performers Table
-        story.append(Paragraph("Top 10 Performing Funds", styles['Heading2']))
-        
-        if not df_tiered.empty:
-            top_funds = df_tiered.sort_values('Score', ascending=False).head(10)
-            
-            # Prepare table data
-            table_data = [['Rank', 'Ticker', 'Fund Name', 'Score', 'Tier', 'Total Return (%)']]
-            
-            for i, (_, fund) in enumerate(top_funds.iterrows(), 1):
-                table_data.append([
-                    str(i),
-                    str(fund['Ticker'])[:15],
-                    str(fund['Fund Name'])[:30] + '...' if len(str(fund['Fund Name'])) > 30 else str(fund['Fund Name']),
-                    f"{fund['Score']:.2f}" if pd.notna(fund['Score']) else 'N/A',
-                    str(fund['Tier']),
-                    f"{fund['Total Return (%)']:.2f}" if pd.notna(fund.get('Total Return (%)')) else 'N/A'
-                ])
-            
-            # Create table
-            table = Table(table_data)
-            table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1f4e79')),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (-1, 0), 10),
-                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-                ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-                ('GRID', (0, 0), (-1, -1), 1, colors.black)
-            ]))
-            
-            story.append(table)
-            story.append(Spacer(1, 20))
-        
-        # Methodology section
-        story.append(PageBreak())
-        story.append(Paragraph("Methodology & Scoring Framework", styles['Heading2']))
-        
-        methodology_text = f"""
-        <b>Composite Scoring Methodology:</b><br/>
-        Our proprietary scoring system evaluates funds across multiple performance dimensions:
-        <br/><br/>
-        <b>Primary Metrics (85% weight):</b><br/>
-        • Total Return: {METRIC_WEIGHTS['total_return']:.0%} - Absolute performance over the analysis period<br/>
-        • Sharpe Ratio: {METRIC_WEIGHTS['sharpe_composite']:.0%} - Risk-adjusted return efficiency<br/>
-        • Sortino Ratio: {METRIC_WEIGHTS['sortino_composite']:.0%} - Downside risk-adjusted returns<br/>
-        • Category Delta: {METRIC_WEIGHTS['delta']:.0%} - Relative performance vs category peers<br/>
-        <br/>
-        <b>Efficiency Metrics (15% weight):</b><br/>
-        • AUM Scale Factor: {METRIC_WEIGHTS['aum']:.1%} - Asset size considerations<br/>
-        • Expense Efficiency: {METRIC_WEIGHTS['expense']:.1%} - Cost-adjusted performance<br/>
-        <br/>
-        <b>Quality Controls:</b><br/>
-        • Integrity penalties applied for statistical anomalies<br/>
-        • Volatility adjustments for excessive risk<br/>
-        • Performance consistency checks<br/>
-        """
-        
-        story.append(Paragraph(methodology_text, styles['Normal']))
-        story.append(Spacer(1, 20))
-        
-        # Risk Considerations
-        story.append(Paragraph("Risk Considerations & Disclaimers", styles['Heading2']))
-        
-        disclaimers = """
-        <b>Important Risk Disclosures:</b><br/>
-        • Past performance does not guarantee future results<br/>
-        • All investments carry risk of loss, including potential loss of principal<br/>
-        • Semi-liquid alternatives may have limited liquidity and redemption restrictions<br/>
-        • This analysis is for informational purposes only and does not constitute investment advice<br/>
-        • Consult with qualified financial professionals before making investment decisions<br/>
-        <br/>
-        <b>Data Quality Notes:</b><br/>
-        • Analysis based on publicly available fund data<br/>
-        • Scoring methodology subject to data availability and quality<br/>
-        • Regular updates recommended to reflect current market conditions<br/>
-        """
-        
-        story.append(Paragraph(disclaimers, styles['Normal']))
-        
-        # Build PDF
-        doc.build(story)
-        buffer.seek(0)
-        
-        return buffer
+        return csv_buffer.getvalue()
         
     except Exception as e:
-        st.error(f"PDF generation failed: {str(e)}")
+        st.error(f"CSV generation failed: {str(e)}")
         return None
 
 def save_portfolio_configuration(portfolio_config, config_name):
@@ -4278,11 +4203,11 @@ def create_professional_features_sidebar():
     st.sidebar.markdown("---")
     st.sidebar.markdown("### 🎓 Professional Features")
     
-    # PDF Export
-    if st.sidebar.button("📄 Generate PDF Report", help="Create comprehensive PDF analysis report"):
-        st.sidebar.info("PDF generation feature - would create detailed report")
-        # This would trigger PDF generation in the main interface
-        st.session_state.generate_pdf = True
+    # CSV Export
+    if st.sidebar.button("📊 Generate CSV Report", help="Create comprehensive CSV analysis report"):
+        st.sidebar.info("CSV generation feature - creating detailed report")
+        # This would trigger CSV generation in the main interface
+        st.session_state.generate_csv = True
     
     # Portfolio Management
     st.sidebar.markdown("#### 💾 Portfolio Management")
@@ -4320,30 +4245,30 @@ def create_professional_features_sidebar():
 def add_professional_features_to_tabs(df_tiered):
     """Add professional features integration to existing tabs"""
     
-    # Check for PDF generation request
-    if st.session_state.get('generate_pdf', False):
+    # Check for CSV report generation request
+    if st.session_state.get('generate_csv', False):
         st.markdown("---")
-        st.subheader("📄 PDF Report Generation")
+        st.subheader("📊 CSV Report Generation")
         
-        with st.spinner("Generating comprehensive PDF report..."):
-            pdf_buffer = generate_pdf_report(df_tiered)
+        with st.spinner("Generating comprehensive CSV report..."):
+            csv_data = generate_csv_report(df_tiered)
             
-            if pdf_buffer:
-                st.success("✅ PDF report generated successfully!")
+            if csv_data:
+                st.success("✅ CSV report generated successfully!")
                 
                 # Create download button
                 st.download_button(
-                    label="📥 Download PDF Report",
-                    data=pdf_buffer.getvalue(),
-                    file_name=f"fund_analysis_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
-                    mime="application/pdf",
-                    help="Download the comprehensive fund analysis report"
+                    label="📥 Download CSV Report",
+                    data=csv_data,
+                    file_name=f"fund_analysis_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                    mime="text/csv",
+                    help="Download the comprehensive fund analysis report as CSV"
                 )
             else:
-                st.error("❌ PDF generation failed")
+                st.error("❌ CSV generation failed")
         
         # Reset the flag
-        st.session_state.generate_pdf = False
+        st.session_state.generate_csv = False
     
     # Check for data export request
     if st.session_state.get('export_data'):
