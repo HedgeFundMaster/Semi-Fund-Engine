@@ -962,6 +962,11 @@ def create_main_rankings_tab(df_tiered):
         
         category_opts = st.multiselect("Categories:", categories_for_display, default=categories_for_display)
         
+        # Display options
+        st.markdown("**📊 Display Options:**")
+        show_all_rows = st.checkbox("Show all funds in Complete Rankings", value=True, 
+                                   help="Uncheck to limit to top 50 funds for faster loading")
+        
     
     # Apply filters with detailed debugging
     filtered_df = df_tiered.copy()
@@ -1139,12 +1144,39 @@ def create_main_rankings_tab(df_tiered):
     # Full rankings table
     st.subheader("📊 Complete Rankings")
     if not filtered_df.empty:
+        # Sort the data first to ensure we're not losing anything in the sort operation
+        sorted_df = filtered_df.sort_values("Score", ascending=False)
+        display_columns = ["Ticker", "Fund", "Category", "Score", "Tier", "Inception Group", "AUM", "Net Expense"]
+        
+        # Apply display limit if requested
+        if show_all_rows:
+            display_df = sorted_df
+            rows_message = f"📋 **Showing all {len(display_df)} funds in Complete Rankings**"
+        else:
+            display_df = sorted_df.head(50)
+            rows_message = f"📋 **Showing top {len(display_df)} funds (of {len(sorted_df)} total) in Complete Rankings**"
+        
+        st.write(rows_message)
+        
+        # Check if sorting changed the count (it shouldn't)
+        if len(sorted_df) != len(filtered_df):
+            st.error(f"⚠️ SORTING ERROR: Started with {len(filtered_df)} funds, sorted result has {len(sorted_df)} funds")
+        
+        # Display with sufficient height to show all rows
+        table_height = min(600, len(display_df) * 35 + 50) if show_all_rows else 400
         st.dataframe(
-            style_tiers(filtered_df.sort_values("Score", ascending=False)[
-                ["Ticker", "Fund", "Category", "Score", "Tier", "Inception Group", "AUM", "Net Expense"]
-            ]), 
-            use_container_width=True
+            style_tiers(display_df[display_columns]), 
+            use_container_width=True,
+            height=table_height
         )
+        
+        # Add confirmation after display
+        st.caption(f"✅ Complete Rankings table displaying {len(display_df)} rows")
+        
+        if not show_all_rows and len(sorted_df) > 50:
+            st.info(f"💡 Showing top 50 funds. Check 'Show all funds' in sidebar to see all {len(sorted_df)} funds.")
+    else:
+        st.info("No funds match the current filters")
     
     # Add download functionality
     create_enhanced_download_section(df_tiered, filtered_df, inception_opts)
