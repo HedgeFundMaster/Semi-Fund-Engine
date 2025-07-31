@@ -1,6 +1,53 @@
 # ─── 0) STREAMLIT CONFIG & LIBRARIES ───────────────────────────────────────
 import streamlit as st
-st.set_page_config(page_title="Fund Dashboard", layout="wide")
+st.set_page_config(page_title="Fund Dashboard", layout="wide", page_icon="📊")
+
+# Custom CSS for enhanced styling
+st.markdown("""
+<style>
+    .main-header {
+        padding: 2rem 0;
+        text-align: center;
+        background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        margin: -1rem -1rem 2rem -1rem;
+        border-radius: 10px;
+    }
+    
+    .metric-container {
+        background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+        padding: 1rem;
+        border-radius: 10px;
+        border-left: 4px solid #667eea;
+        margin: 0.5rem 0;
+    }
+    
+    .tier-badge {
+        display: inline-block;
+        padding: 0.25rem 0.75rem;
+        border-radius: 15px;
+        font-weight: bold;
+        font-size: 0.8rem;
+    }
+    
+    .tier-1 { background: #d4edda; color: #155724; }
+    .tier-2 { background: #fff3cd; color: #856404; }
+    .tier-3 { background: #f8d7da; color: #721c24; }
+    
+    .fund-card {
+        background: white;
+        padding: 1rem;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        margin: 0.5rem 0;
+        border-left: 4px solid #667eea;
+    }
+    
+    .score-high { color: #28a745; font-weight: bold; }
+    .score-medium { color: #ffc107; font-weight: bold; }
+    .score-low { color: #dc3545; font-weight: bold; }
+</style>
+""", unsafe_allow_html=True)
 
 
 import logging
@@ -190,7 +237,6 @@ def load_inception_group(tab_keyword: str) -> pd.DataFrame:
         # Remove completely empty rows
         df = df.dropna(how='all')
         
-        st.write(f"📊 Loaded {tab_keyword}: {len(df)} funds")
         return df
         
     except Exception as e:
@@ -884,238 +930,329 @@ def create_data_quality_export(df):
 
 def create_main_rankings_tab(df_tiered):
     """Main Rankings tab with enhanced filters and fund listings"""
-    st.title("🏆 Fund Rankings")
+    
+    # Professional header
+    st.markdown("""
+    <div class="main-header">
+        <h1>🏆 Professional Fund Rankings Dashboard</h1>
+        <p>Advanced quantitative analysis and performance scoring</p>
+    </div>
+    """, unsafe_allow_html=True)
     
     # Enhanced sidebar filters
     with st.sidebar:
-        st.header("🔍 Enhanced Filters")
+        st.markdown("### 🔍 **Smart Filters**")
+        st.caption("🎯 Use filters to find funds matching your criteria")
         
         
-        # Score range filter
+        # Score range filter with enhanced help
         if not df_tiered[~pd.isna(df_tiered['Score'])].empty:
             score_min = float(df_tiered['Score'].min())
             score_max = float(df_tiered['Score'].max())
             score_range = st.slider(
-                "Score Range",
+                "📊 Composite Score Range",
                 min_value=score_min,
                 max_value=score_max,
                 value=(score_min, score_max),
-                step=0.1
+                step=0.1,
+                help="Filter funds by their composite performance score. Higher scores indicate better overall performance across all metrics."
             )
         else:
             score_range = None
         
-        # AUM range filter
+        # AUM range filter with enhanced help
         if 'AUM' in df_tiered.columns and not df_tiered['AUM'].isna().all():
             aum_values = df_tiered['AUM'].dropna()
             if not aum_values.empty:
                 aum_min = float(aum_values.min())
                 aum_max = float(aum_values.max())
                 aum_range = st.slider(
-                    "AUM Range (Millions)",
+                    "💰 AUM Range (Millions)",
                     min_value=aum_min,
                     max_value=aum_max,
                     value=(aum_min, aum_max),
-                    step=10.0
+                    step=10.0,
+                    help="Filter by Assets Under Management. Larger funds may offer more stability but smaller funds might be more agile."
                 )
             else:
                 aum_range = None
         else:
             aum_range = None
         
-        # Expense ratio filter
+        # Expense ratio filter with enhanced help
         if 'Net Expense' in df_tiered.columns and not df_tiered['Net Expense'].isna().all():
             expense_values = df_tiered['Net Expense'].dropna()
             if not expense_values.empty:
                 expense_min = float(expense_values.min())
                 expense_max = float(expense_values.max())
                 expense_range = st.slider(
-                    "Expense Ratio Range (%)",
+                    "💸 Expense Ratio Range (%)",
                     min_value=expense_min,
                     max_value=expense_max,
                     value=(expense_min, expense_max),
-                    step=0.01
+                    step=0.01,
+                    help="Filter by annual expense ratio. Lower expenses mean more returns stay in your pocket."
                 )
             else:
                 expense_range = None
         else:
             expense_range = None
         
-        # Fund search
+        # Fund search with enhanced help
         fund_options = ["All Funds"] + sorted(df_tiered['Ticker'].dropna().unique().tolist())
-        selected_fund = st.selectbox("Search Specific Fund:", fund_options)
+        selected_fund = st.selectbox(
+            "🔍 Search Specific Fund:", 
+            fund_options,
+            help="Search for a specific fund by ticker symbol to view detailed analysis"
+        )
         
-        # Standard filters
+        # Standard filters with enhanced help
         st.markdown("---")
-        inception_opts = st.multiselect("Inception Groups:", ["1Y+", "3Y+", "5Y+"], default=["1Y+", "3Y+", "5Y+"])
-        tier_opts = st.multiselect("Tiers:", ["Tier 1", "Tier 2", "Tier 3", "No Data"], default=["Tier 1", "Tier 2", "Tier 3", "No Data"])
+        inception_opts = st.multiselect(
+            "📅 Inception Groups:", 
+            ["1Y+", "3Y+", "5Y+"], 
+            default=["1Y+", "3Y+", "5Y+"],
+            help="Filter by fund age. Older funds have longer track records but younger funds may be more innovative."
+        )
+        tier_opts = st.multiselect(
+            "🏆 Performance Tiers:", 
+            ["Tier 1", "Tier 2", "Tier 3", "No Data"], 
+            default=["Tier 1", "Tier 2", "Tier 3", "No Data"],
+            help="Filter by performance tier. Tier 1 = Best, Tier 2 = Good, Tier 3 = Below Average"
+        )
         # Handle categories including potential NaN values
         all_categories = df_tiered['Category'].unique()
         # Remove NaN from the list but keep track of it
         categories_for_display = [cat for cat in all_categories if pd.notna(cat)]
         categories_for_display = sorted(categories_for_display)
         
-        # Check if there are funds with NaN categories
-        nan_category_count = df_tiered['Category'].isna().sum()
-        if nan_category_count > 0:
-            st.sidebar.warning(f"⚠️ {nan_category_count} funds have missing category data")
         
-        category_opts = st.multiselect("Categories:", categories_for_display, default=categories_for_display)
+        category_opts = st.multiselect(
+            "📂 Fund Categories:", 
+            categories_for_display, 
+            default=categories_for_display,
+            help="Filter by investment category/strategy. Select specific categories to focus your analysis."
+        )
         
         # Display options
+        st.markdown("---")
         st.markdown("**📊 Display Options:**")
-        show_all_rows = st.checkbox("Show all funds in Complete Rankings", value=True, 
-                                   help="Uncheck to limit to top 50 funds for faster loading")
+        show_all_rows = st.checkbox(
+            "Show all funds in Complete Rankings", 
+            value=True, 
+            help="Uncheck to limit to top 50 funds for faster loading on slower connections"
+        )
+        
+        # Scoring Methodology Explanation
+        st.markdown("---")
+        with st.expander("📊 **Scoring Methodology**", expanded=False):
+            st.markdown("### 📈 **Metric Weights**")
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown(f"""
+                **Core Performance:**
+                - 📊 Total Return: **{METRIC_WEIGHTS['total_return']:.0%}**
+                - ⚡ Sharpe Ratio: **{METRIC_WEIGHTS['sharpe_composite']:.0%}**
+                - 🛡️ Sortino Ratio: **{METRIC_WEIGHTS['sortino_composite']:.0%}**
+                """)
+            
+            with col2:
+                st.markdown(f"""
+                **Additional Factors:**
+                - 📈 Category Delta: **{METRIC_WEIGHTS['delta']:.0%}**
+                - 💰 AUM Scale: **{METRIC_WEIGHTS['aum']:.1%}**
+                - 💸 Expense Efficiency: **{METRIC_WEIGHTS['expense']:.1%}**
+                """)
+            
+            st.markdown("### ⚠️ **Penalty System**")
+            st.markdown(f"""
+            - 🚩 **Integrity Penalty:** -{INTEGRITY_PENALTY_AMOUNT} for Sharpe > {INTEGRITY_PENALTY_THRESHOLD}
+            - 📉 **High Volatility:** -0.1 for top quartile standard deviation
+            - 📉 **Poor 2022 Performance:** -0.1 for bottom quartile 2022 returns
+            """)
+            
+            st.markdown("### 🎯 **Dynamic Tier Thresholds**")
+            if 'tier1_threshold' in df_tiered.columns and 'tier2_threshold' in df_tiered.columns:
+                tier1_thresh = df_tiered['tier1_threshold'].iloc[0]
+                tier2_thresh = df_tiered['tier2_threshold'].iloc[0]
+                st.markdown(f"""
+                - 🥇 **Tier 1:** Score ≥ {tier1_thresh:.2f} (Top {DEFAULT_TIER_THRESHOLDS['tier1_percentile']:.0%})
+                - 🥈 **Tier 2:** Score ≥ {tier2_thresh:.2f} (Top {DEFAULT_TIER_THRESHOLDS['tier2_percentile']:.0%})
+                - 🥉 **Tier 3:** Score < {tier2_thresh:.2f}
+                """)
+            
+            st.markdown("### 🧮 **Composite Score Formula**")
+            st.code("""
+            Score = (Total_Return × 0.30) + 
+                   (Sharpe_Composite × 0.25) + 
+                   (Sortino_Composite × 0.20) + 
+                   (Category_Delta × 0.10) + 
+                   (AUM_Score × 0.075) + 
+                   (Expense_Score × 0.075) 
+                   - Penalties
+            """)
+        
+        # Fund Comparison Tool
+        st.markdown("---")
+        with st.expander("🔍 **Fund Comparison Tool**", expanded=False):
+            st.markdown("### Compare Funds Side-by-Side")
+            
+            # Get available funds for comparison
+            available_funds = df_tiered['Ticker'].dropna().unique().tolist()
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                fund1 = st.selectbox("Select Fund 1:", ["None"] + available_funds, key="fund1")
+            with col2:
+                fund2 = st.selectbox("Select Fund 2:", ["None"] + available_funds, key="fund2")
+            
+            # Optional third fund
+            fund3 = st.selectbox("Select Fund 3 (Optional):", ["None"] + available_funds, key="fund3")
+            
+            # Perform comparison if funds are selected
+            selected_funds = [f for f in [fund1, fund2, fund3] if f != "None"]
+            
+            if len(selected_funds) >= 2:
+                comparison_data = []
+                
+                for ticker in selected_funds:
+                    fund_data = df_tiered[df_tiered['Ticker'] == ticker].iloc[0]
+                    comparison_data.append({
+                        'Ticker': ticker,
+                        'Fund Name': fund_data.get('Fund', 'N/A'),
+                        'Score': f"{fund_data.get('Score', 0):.2f}",
+                        'Tier': fund_data.get('Tier', 'N/A'),
+                        'Category': fund_data.get('Category', 'N/A'),
+                        'Total Return': f"{fund_data.get('Total Return', 0):.2f}%" if pd.notna(fund_data.get('Total Return')) else 'N/A',
+                        'Sharpe (1Y)': f"{fund_data.get('Sharpe (1Y)', 0):.2f}" if pd.notna(fund_data.get('Sharpe (1Y)')) else 'N/A',
+                        'Sortino (1Y)': f"{fund_data.get('Sortino (1Y)', 0):.2f}" if pd.notna(fund_data.get('Sortino (1Y)')) else 'N/A',
+                        'AUM ($M)': f"{fund_data.get('AUM', 0):.0f}" if pd.notna(fund_data.get('AUM')) else 'N/A',
+                        'Expense Ratio': f"{fund_data.get('Net Expense', 0):.2f}%" if pd.notna(fund_data.get('Net Expense')) else 'N/A',
+                        'Inception Group': fund_data.get('Inception Group', 'N/A')
+                    })
+                
+                comparison_df = pd.DataFrame(comparison_data).T
+                comparison_df.columns = [f"Fund {i+1}" for i in range(len(selected_funds))]
+                
+                st.markdown("#### 📊 **Comparison Table**")
+                st.dataframe(comparison_df, use_container_width=True)
+                
+                # Score comparison chart
+                if len(selected_funds) >= 2:
+                    st.markdown("#### 📈 **Score Comparison**")
+                    scores = [df_tiered[df_tiered['Ticker'] == ticker]['Score'].iloc[0] for ticker in selected_funds]
+                    
+                    fig_comparison = px.bar(
+                        x=selected_funds,
+                        y=scores,
+                        title="Fund Score Comparison",
+                        labels={'x': 'Fund', 'y': 'Composite Score'},
+                        color=scores,
+                        color_continuous_scale='RdYlGn'
+                    )
+                    fig_comparison.update_layout(height=400, showlegend=False)
+                    st.plotly_chart(fig_comparison, use_container_width=True)
         
     
-    # Apply filters with detailed debugging
+    # Apply filters
     filtered_df = df_tiered.copy()
-    st.write(f"🚀 **FILTER DEBUGGING - Starting with {len(filtered_df)} funds**")
     
-    # Apply score range
-    before_score = len(filtered_df)
+    # Apply score range filter
     if score_range and not df_tiered[~pd.isna(df_tiered['Score'])].empty:
-        # Check how many funds have NaN scores
-        nan_score_count = filtered_df['Score'].isna().sum()
-        st.write(f"🔍 Funds with NaN scores before filter: {nan_score_count}")
-        
-        # Only filter funds that have valid scores
         valid_scores = ~pd.isna(filtered_df['Score'])
         score_filtered = filtered_df[valid_scores & (filtered_df['Score'] >= score_range[0]) & (filtered_df['Score'] <= score_range[1])]
         
         # Include funds with NaN scores if the range covers the full spectrum
         score_values = filtered_df['Score'].dropna()
         if not score_values.empty and score_range[0] <= score_values.min() and score_range[1] >= score_values.max():
-            # Full range selected - include NaN score funds too
             nan_score_funds = filtered_df[filtered_df['Score'].isna()]
             filtered_df = pd.concat([score_filtered, nan_score_funds])
-            st.write(f"📊 After score filter (including NaN): {before_score} → {len(filtered_df)} funds")
         else:
             filtered_df = score_filtered
-            st.write(f"📊 After score filter (excluding NaN): {before_score} → {len(filtered_df)} funds")
-    else:
-        st.write(f"📊 Score filter skipped: {len(filtered_df)} funds")
     
-    # Apply AUM range
-    before_aum = len(filtered_df)
+    # Apply AUM range filter
     if aum_range and 'AUM' in filtered_df.columns:
-        # Check how many funds have NaN AUM values
-        nan_aum_count = filtered_df['AUM'].isna().sum()
-        st.write(f"🔍 Funds with NaN AUM before filter: {nan_aum_count}")
-        
-        # Only filter funds that have valid AUM data
         valid_aum = ~pd.isna(filtered_df['AUM'])
         aum_filtered = filtered_df[valid_aum & (filtered_df['AUM'] >= aum_range[0]) & (filtered_df['AUM'] <= aum_range[1])]
         
         # Include funds with NaN AUM if the range covers the full spectrum
         aum_values = filtered_df['AUM'].dropna()
         if not aum_values.empty and aum_range[0] <= aum_values.min() and aum_range[1] >= aum_values.max():
-            # Full range selected - include NaN AUM funds too
             nan_aum_funds = filtered_df[filtered_df['AUM'].isna()]
             filtered_df = pd.concat([aum_filtered, nan_aum_funds])
-            st.write(f"💰 After AUM filter (including NaN): {before_aum} → {len(filtered_df)} funds")
         else:
             filtered_df = aum_filtered
-            st.write(f"💰 After AUM filter (excluding NaN): {before_aum} → {len(filtered_df)} funds")
-    else:
-        st.write(f"💰 AUM filter skipped: {len(filtered_df)} funds")
     
-    # Apply expense range
-    before_expense = len(filtered_df)
+    # Apply expense range filter
     if expense_range and 'Net Expense' in filtered_df.columns:
-        # Check how many funds have NaN expense values
-        nan_expense_count = filtered_df['Net Expense'].isna().sum()
-        st.write(f"🔍 Funds with NaN expense before filter: {nan_expense_count}")
-        
-        # Only filter funds that have valid expense data
         valid_expense = ~pd.isna(filtered_df['Net Expense'])
         expense_filtered = filtered_df[valid_expense & (filtered_df['Net Expense'] >= expense_range[0]) & (filtered_df['Net Expense'] <= expense_range[1])]
         
         # Include funds with NaN expense if the range covers the full spectrum
         expense_values = filtered_df['Net Expense'].dropna()
         if not expense_values.empty and expense_range[0] <= expense_values.min() and expense_range[1] >= expense_values.max():
-            # Full range selected - include NaN expense funds too
             nan_expense_funds = filtered_df[filtered_df['Net Expense'].isna()]
             filtered_df = pd.concat([expense_filtered, nan_expense_funds])
-            st.write(f"💸 After expense filter (including NaN): {before_expense} → {len(filtered_df)} funds")
         else:
             filtered_df = expense_filtered
-            st.write(f"💸 After expense filter (excluding NaN): {before_expense} → {len(filtered_df)} funds")
-    else:
-        st.write(f"💸 Expense filter skipped: {len(filtered_df)} funds")
     
-    # Apply fund search
-    before_search = len(filtered_df)
+    # Apply fund search filter
     if selected_fund != "All Funds":
         filtered_df = filtered_df[filtered_df['Ticker'] == selected_fund]
-        st.write(f"🔍 After fund search: {before_search} → {len(filtered_df)} funds")
-    else:
-        st.write(f"🔍 Fund search skipped: {len(filtered_df)} funds")
     
-    # Apply inception group filter
-    before_inception = len(filtered_df)
+    # Apply standard filters
     filtered_df = filtered_df[filtered_df['Inception Group'].isin(inception_opts)]
-    st.write(f"📅 After inception filter: {before_inception} → {len(filtered_df)} funds")
-    
-    # Apply tier filter
-    before_tier = len(filtered_df)
     filtered_df = filtered_df[filtered_df['Tier'].isin(tier_opts)]
-    st.write(f"🏆 After tier filter: {before_tier} → {len(filtered_df)} funds")
-    
-    # Show what tiers are available vs selected
-    available_tiers = df_tiered['Tier'].value_counts()
-    st.write(f"🔍 Available tiers: {dict(available_tiers)}")
-    st.write(f"🎯 Selected tiers: {tier_opts}")
-    
-    # Apply category filter (including handling of NaN categories)
-    before_category = len(filtered_df)
-    
-    # Check how many funds have NaN categories before filtering
-    nan_categories_before = filtered_df['Category'].isna().sum()
-    st.write(f"🔍 Funds with NaN categories before filter: {nan_categories_before}")
     
     # Apply category filter - include NaN categories when all categories are selected
     if len(category_opts) == len(categories_for_display):
-        # All categories selected - include funds with NaN categories too
         filtered_df = filtered_df[(filtered_df['Category'].isin(category_opts)) | (filtered_df['Category'].isna())]
-        st.write(f"📂 After category filter (including NaN): {before_category} → {len(filtered_df)} funds")
     else:
-        # Specific categories selected - exclude NaN categories
         filtered_df = filtered_df[filtered_df['Category'].isin(category_opts)]
-        st.write(f"📂 After category filter (excluding NaN): {before_category} → {len(filtered_df)} funds")
     
-    # Show category debugging
-    available_categories = df_tiered['Category'].value_counts(dropna=False)  # Include NaN counts
-    st.write(f"🔍 Total available categories: {len(available_categories)}")
-    st.write(f"🎯 Selected categories: {len(category_opts)}")
-    
-    # Check if NaN categories are causing the loss
-    if nan_categories_before > 0:
-        st.warning(f"⚠️ {nan_categories_before} funds with missing categories were excluded by category filter")
-        # Show some examples of funds with missing categories
-        missing_cat_funds = df_tiered[df_tiered['Category'].isna()]
-        if len(missing_cat_funds) > 0:
-            st.write("📋 Sample funds with missing categories:")
-            st.write(missing_cat_funds[['Ticker', 'Fund', 'Tier', 'Inception Group']].head(5))
-    
-    st.write(f"✅ **FINAL RESULT: {len(filtered_df)} funds displayed**")
-    
-    # Key metrics cards
+    # Enhanced Key metrics cards with trend indicators
     col1, col2, col3, col4 = st.columns(4)
     
     total_funds = len(filtered_df)
     tier1_count = len(filtered_df[filtered_df['Tier'] == 'Tier 1'])
     tier2_count = len(filtered_df[filtered_df['Tier'] == 'Tier 2'])
+    tier3_count = len(filtered_df[filtered_df['Tier'] == 'Tier 3'])
     avg_score = filtered_df['Score'].mean() if not filtered_df['Score'].isna().all() else 0
     
+    # Calculate quality metrics for delta indicators
+    tier1_pct = (tier1_count / total_funds * 100) if total_funds > 0 else 0
+    tier2_pct = (tier2_count / total_funds * 100) if total_funds > 0 else 0
+    
     with col1:
-        st.metric("Total Funds", total_funds)
+        st.metric(
+            "📊 Total Funds", 
+            value=f"{total_funds}",
+            help="Total number of funds matching current filters"
+        )
     with col2:
-        st.metric("Tier 1 Funds", tier1_count)
+        st.metric(
+            "🥇 Tier 1 Funds", 
+            value=f"{tier1_count}",
+            delta=f"{tier1_pct:.1f}% of total",
+            help="Top-tier funds with exceptional performance"
+        )
     with col3:
-        st.metric("Tier 2 Funds", tier2_count)
+        st.metric(
+            "🥈 Tier 2 Funds", 
+            value=f"{tier2_count}",
+            delta=f"{tier2_pct:.1f}% of total",
+            help="High-quality funds with strong performance"
+        )
     with col4:
-        st.metric("Average Score", f"{avg_score:.2f}")
+        # Add performance indicator for average score
+        score_quality = "Excellent" if avg_score > 8 else "Good" if avg_score > 6 else "Moderate" if avg_score > 4 else "Below Average"
+        st.metric(
+            "🎯 Average Score", 
+            value=f"{avg_score:.2f}",
+            delta=f"{score_quality}",
+            help="Mean composite score of filtered funds"
+        )
     
     st.markdown("---")
     
@@ -1141,6 +1278,116 @@ def create_main_rankings_tab(df_tiered):
                     display_cols = ["Ticker", "Fund", "Score", "Tier"]
                     st.dataframe(style_tiers(group_data[display_cols]), use_container_width=True)
     
+    # Score Breakdown for Top Performers
+    if not filtered_df.empty:
+        st.markdown("---")
+        st.subheader("🧮 Score Breakdown Analysis")
+        
+        # Get top 5 funds for breakdown
+        top_funds = filtered_df.sort_values("Score", ascending=False).head(5)
+        
+        # Create score breakdown data
+        breakdown_data = []
+        for _, fund in top_funds.iterrows():
+            # Calculate component contributions
+            total_return_contrib = fund.get('Total Return', 0) * METRIC_WEIGHTS['total_return'] if pd.notna(fund.get('Total Return')) else 0
+            sharpe_contrib = fund.get('sharpe_composite', 0) * METRIC_WEIGHTS['sharpe_composite'] if pd.notna(fund.get('sharpe_composite')) else 0
+            sortino_contrib = fund.get('sortino_composite', 0) * METRIC_WEIGHTS['sortino_composite'] if pd.notna(fund.get('sortino_composite')) else 0
+            delta_contrib = fund.get('Delta', 0) * METRIC_WEIGHTS['delta'] if pd.notna(fund.get('Delta')) else 0
+            aum_contrib = fund.get('aum_score', 0) * METRIC_WEIGHTS['aum'] if pd.notna(fund.get('aum_score')) else 0
+            expense_contrib = fund.get('expense_score', 0) * METRIC_WEIGHTS['expense'] if pd.notna(fund.get('expense_score')) else 0
+            
+            breakdown_data.append({
+                'Fund': f"{fund['Ticker']} ({fund['Tier']})",
+                'Total Return': total_return_contrib,
+                'Sharpe Ratio': sharpe_contrib,
+                'Sortino Ratio': sortino_contrib,
+                'Category Delta': delta_contrib,
+                'AUM Score': aum_contrib,
+                'Expense Score': expense_contrib,
+                'Total Score': fund['Score']
+            })
+        
+        breakdown_df = pd.DataFrame(breakdown_data)
+        
+        col1, col2 = st.columns([2, 1])
+        
+        with col1:
+            st.markdown("#### 📊 Component Contributions")
+            
+            # Create stacked bar chart
+            components = ['Total Return', 'Sharpe Ratio', 'Sortino Ratio', 'Category Delta', 'AUM Score', 'Expense Score']
+            
+            fig_breakdown = go.Figure()
+            
+            colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7', '#DDA0DD']
+            
+            for i, component in enumerate(components):
+                fig_breakdown.add_trace(go.Bar(
+                    name=component,
+                    x=breakdown_df['Fund'],
+                    y=breakdown_df[component],
+                    marker_color=colors[i % len(colors)]
+                ))
+            
+            fig_breakdown.update_layout(
+                barmode='stack',
+                title="Score Component Breakdown - Top 5 Funds",
+                xaxis_title="Fund (Tier)",
+                yaxis_title="Score Contribution",
+                height=400,
+                legend=dict(orientation="v", yanchor="top", y=1, xanchor="left", x=1.02)
+            )
+            
+            st.plotly_chart(fig_breakdown, use_container_width=True)
+        
+        with col2:
+            st.markdown("#### 🎯 Key Insights")
+            
+            # Find the fund with highest total return contribution
+            best_return = breakdown_df.loc[breakdown_df['Total Return'].idxmax()]
+            best_risk_adj = breakdown_df.loc[breakdown_df['Sharpe Ratio'].idxmax()]
+            
+            st.markdown(f"""
+            **🏆 Best Total Return:**  
+            {best_return['Fund']}  
+            Contribution: {best_return['Total Return']:.3f}
+            
+            **⚡ Best Risk-Adjusted:**  
+            {best_risk_adj['Fund']}  
+            Sharpe Contribution: {best_risk_adj['Sharpe Ratio']:.3f}
+            
+            **💡 Component Analysis:**
+            • Total Return drives {METRIC_WEIGHTS['total_return']:.0%} of score
+            • Risk metrics contribute {METRIC_WEIGHTS['sharpe_composite'] + METRIC_WEIGHTS['sortino_composite']:.0%}
+            • Efficiency factors add {METRIC_WEIGHTS['aum'] + METRIC_WEIGHTS['expense']:.0%}
+            """)
+            
+            # Score distribution info
+            avg_score = top_funds['Score'].mean()
+            score_range = top_funds['Score'].max() - top_funds['Score'].min()
+            
+            st.markdown(f"""
+            **📈 Top 5 Statistics:**
+            • Average Score: {avg_score:.2f}
+            • Score Range: {score_range:.2f}
+            """)
+            
+            # Performance badges
+            top_fund = top_funds.iloc[0]
+            badges = []
+            if pd.notna(top_fund.get('Total Return')) and top_fund['Total Return'] > 10:
+                badges.append("🔥 High Return")
+            if pd.notna(top_fund.get('Sharpe (1Y)')) and top_fund['Sharpe (1Y)'] > 1.5:
+                badges.append("⚡ Excellent Sharpe")
+            if pd.notna(top_fund.get('Net Expense')) and top_fund['Net Expense'] < 0.5:
+                badges.append("💎 Low Cost")
+            
+            if badges:
+                st.markdown("**🏅 Top Fund Badges:**")
+                for badge in badges:
+                    st.markdown(f"• {badge}")
+    
     # Full rankings table
     st.subheader("📊 Complete Rankings")
     if not filtered_df.empty:
@@ -1151,16 +1398,8 @@ def create_main_rankings_tab(df_tiered):
         # Apply display limit if requested
         if show_all_rows:
             display_df = sorted_df
-            rows_message = f"📋 **Showing all {len(display_df)} funds in Complete Rankings**"
         else:
             display_df = sorted_df.head(50)
-            rows_message = f"📋 **Showing top {len(display_df)} funds (of {len(sorted_df)} total) in Complete Rankings**"
-        
-        st.write(rows_message)
-        
-        # Check if sorting changed the count (it shouldn't)
-        if len(sorted_df) != len(filtered_df):
-            st.error(f"⚠️ SORTING ERROR: Started with {len(filtered_df)} funds, sorted result has {len(sorted_df)} funds")
         
         # Display with sufficient height to show all rows
         table_height = min(600, len(display_df) * 35 + 50) if show_all_rows else 400
@@ -1169,9 +1408,6 @@ def create_main_rankings_tab(df_tiered):
             use_container_width=True,
             height=table_height
         )
-        
-        # Add confirmation after display
-        st.caption(f"✅ Complete Rankings table displaying {len(display_df)} rows")
         
         if not show_all_rows and len(sorted_df) > 50:
             st.info(f"💡 Showing top 50 funds. Check 'Show all funds' in sidebar to see all {len(sorted_df)} funds.")
@@ -1395,9 +1631,6 @@ def create_dashboard():
         df_all = pd.concat([scored_1y, scored_3y, scored_5y], ignore_index=True)
         df_tiered = assign_tiers(df_all)
     
-    # Show tier distribution for user awareness
-    tier_distribution = df_tiered['Tier'].value_counts()
-    st.success(f"✅ Loaded {len(df_tiered)} funds: {dict(tier_distribution)}")
     
     st.markdown("---")
     
