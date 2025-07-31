@@ -98,6 +98,68 @@ import io
 import base64
 import pickle
 
+# ─── UTILITY FUNCTIONS FOR SAFE PLOTTING ─────────────────────────────────────
+
+def safe_scatter_plot(df, x_col, y_col, title="Scatter Plot", **kwargs):
+    """
+    Create a safe scatter plot with comprehensive data validation and error handling
+    """
+    try:
+        if df is None or df.empty:
+            return None, "No data available"
+        
+        # Check required columns exist
+        if x_col not in df.columns or y_col not in df.columns:
+            return None, f"Missing required columns: {x_col}, {y_col}"
+        
+        # Clean and validate data
+        plot_df = df.copy()
+        
+        # Ensure numeric columns are numeric and handle inf/-inf
+        numeric_cols = [x_col, y_col]
+        size_col = kwargs.get('size')
+        color_col = kwargs.get('color')
+        
+        if size_col and size_col in plot_df.columns:
+            numeric_cols.append(size_col)
+        if color_col and color_col in plot_df.columns and pd.api.types.is_numeric_dtype(plot_df[color_col]):
+            numeric_cols.append(color_col)
+        
+        for col in numeric_cols:
+            if col in plot_df.columns:
+                plot_df[col] = pd.to_numeric(plot_df[col], errors='coerce')
+                plot_df[col] = plot_df[col].replace([np.inf, -np.inf], np.nan)
+        
+        # Remove rows with NaN in essential columns
+        plot_df = plot_df.dropna(subset=[x_col, y_col])
+        
+        if len(plot_df) == 0:
+            return None, "No valid data after cleaning"
+        
+        # Handle size parameter - ensure positive values
+        if size_col and size_col in plot_df.columns:
+            if plot_df[size_col].notna().any():
+                plot_df['Safe_Size'] = np.abs(plot_df[size_col]) + 0.01
+                kwargs['size'] = 'Safe_Size'
+            else:
+                kwargs.pop('size', None)
+        
+        # Clean hover_data
+        if 'hover_data' in kwargs and kwargs['hover_data']:
+            hover_cols = []
+            for col in kwargs['hover_data']:
+                if col in plot_df.columns:
+                    hover_cols.append(col)
+            kwargs['hover_data'] = hover_cols if hover_cols else None
+        
+        # Create the scatter plot
+        fig = px.scatter(plot_df, x=x_col, y=y_col, title=title, **kwargs)
+        
+        return fig, "Success"
+        
+    except Exception as e:
+        return None, f"Error creating scatter plot: {str(e)}"
+
 # Portfolio optimization constants
 RISK_FREE_RATE = 0.02  # 2% risk-free rate assumption
 TRADING_DAYS = 252
@@ -1804,51 +1866,104 @@ def create_main_rankings_tab(df_tiered):
         with comparison_tabs[2]:
             st.markdown("#### 🎯 Risk-Return Efficiency Analysis")
             
-            # Risk-return scatter plot with enhanced features
+            # Risk-return scatter plot with enhanced features and validation
             if 'Total Return (%)' in filtered_df.columns and 'Volatility (%)' in filtered_df.columns:
-                fig_risk_return = px.scatter(
-                    filtered_df,
-                    x='Volatility (%)',
-                    y='Total Return (%)',
-                    size='Score',
-                    color='Tier',
-                    hover_name='Ticker',
-                    hover_data=['Fund Name', 'Sharpe Ratio', 'Category'],
-                    title='Risk-Return Profile with Efficiency Frontier',
-                    color_discrete_map={
-                        'Tier 1': '#2E8B57',
-                        'Tier 2': '#4682B4', 
-                        'Tier 3': '#DAA520',
-                        'No Data': '#696969'
-                    }
-                )
-                
-                # Add efficiency frontier line (simplified)
-                if len(filtered_df) > 5:
-                    sorted_by_return = filtered_df.sort_values('Total Return (%)', ascending=False)
-                    top_performers = sorted_by_return.head(10)
+                try:
+                    # Clean and validate data for scatter plot
+                    plot_df = filtered_df.copy()
                     
-                    if not top_performers.empty:
-                        fig_risk_return.add_trace(go.Scatter(
-                            x=top_performers['Volatility (%)'],
-                            y=top_performers['Total Return (%)'],
-                            mode='lines',
-                            name='Efficiency Guide',
-                            line=dict(color='red', dash='dash', width=2),
-                            hovertemplate='Efficiency Guide<extra></extra>'
-                        ))
+                    # Ensure numeric columns are numeric and handle inf/-inf
+                    numeric_cols = ['Total Return (%)', 'Volatility (%)', 'Score']
+                    for col in numeric_cols:
+                        if col in plot_df.columns:
+                            plot_df[col] = pd.to_numeric(plot_df[col], errors='coerce')
+                            plot_df[col] = plot_df[col].replace([np.inf, -np.inf], np.nan)
+                    
+                    # Remove rows with NaN in essential columns
+                    plot_df = plot_df.dropna(subset=['Total Return (%)', 'Volatility (%)'])
+                    
+                    if len(plot_df) == 0:
+                        st.warning("No valid data for Risk-Return scatter plot")
+                    else:
+                        # Handle size parameter - ensure positive values
+                        if 'Score' in plot_df.columns and plot_df['Score'].notna().any():
+                            plot_df['Size_Value'] = np.abs(plot_df['Score']) + 0.1
+                            size_col = 'Size_Value'
+                        else:
+                            size_col = None
+                        
+                        # Prepare hover data - only include available columns
+                        hover_data_cols = []
+                        for col in ['Fund Name', 'Sharpe Ratio', 'Category']:
+                            if col in plot_df.columns:
+                                hover_data_cols.append(col)
+                        
+                        fig_risk_return = px.scatter(
+                            plot_df,
+                            x='Volatility (%)',
+                            y='Total Return (%)',
+                            size=size_col,
+                            color='Tier',
+                            hover_name='Ticker' if 'Ticker' in plot_df.columns else None,
+                            hover_data=hover_data_cols if hover_data_cols else None,
+                            title='Risk-Return Profile with Efficiency Frontier',
+                            color_discrete_map={
+                                'Tier 1': '#2E8B57',
+                                'Tier 2': '#4682B4', 
+                                'Tier 3': '#DAA520',
+                                'No Data': '#696969'
+                            }
+                        )
+                        
+                except Exception as e:
+                    st.error(f"Error creating Risk-Return scatter plot: {str(e)}")
+                    st.info("Displaying simplified analysis...")
+                    
+                    # Fallback to simple scatter without advanced features
+                    try:
+                        simple_df = filtered_df[['Volatility (%)', 'Total Return (%)']].dropna()
+                        if not simple_df.empty:
+                            fig_risk_return = px.scatter(
+                                simple_df,
+                                x='Volatility (%)',
+                                y='Total Return (%)',
+                                title='Risk-Return Profile (Simplified)'
+                            )
+                        else:
+                            fig_risk_return = None
+                    except:
+                        fig_risk_return = None
                 
-                # Add quadrant lines
-                median_return = filtered_df['Total Return (%)'].median()
-                median_vol = filtered_df['Volatility (%)'].median()
-                
-                fig_risk_return.add_hline(y=median_return, line_dash="dot", 
-                                         annotation_text="Median Return")
-                fig_risk_return.add_vline(x=median_vol, line_dash="dot", 
-                                         annotation_text="Median Risk")
-                
-                fig_risk_return.update_layout(height=600)
-                st.plotly_chart(fig_risk_return, use_container_width=True)
+                if 'fig_risk_return' in locals() and fig_risk_return is not None:
+                    # Add efficiency frontier line (simplified)
+                    if len(filtered_df) > 5:
+                        sorted_by_return = filtered_df.sort_values('Total Return (%)', ascending=False)
+                        top_performers = sorted_by_return.head(10)
+                        
+                        if not top_performers.empty:
+                            fig_risk_return.add_trace(go.Scatter(
+                                x=top_performers['Volatility (%)'],
+                                y=top_performers['Total Return (%)'],
+                                mode='lines',
+                                name='Efficiency Guide',
+                                line=dict(color='red', dash='dash', width=2),
+                                hovertemplate='Efficiency Guide<extra></extra>'
+                            ))
+                    
+                    # Add quadrant lines
+                    median_return = filtered_df['Total Return (%)'].median()
+                    median_vol = filtered_df['Volatility (%)'].median()
+                    
+                    fig_risk_return.add_hline(y=median_return, line_dash="dot", 
+                                             annotation_text="Median Return")
+                    fig_risk_return.add_vline(x=median_vol, line_dash="dot", 
+                                             annotation_text="Median Risk")
+                    
+                    fig_risk_return.update_layout(height=600)
+                    st.plotly_chart(fig_risk_return, use_container_width=True)
+                    
+                    # Quadrant analysis
+                    st.markdown("#### 📊 Risk-Return Quadrant Analysis")
                 
                 # Quadrant analysis
                 st.markdown("#### 📊 Risk-Return Quadrant Analysis")
@@ -2787,27 +2902,98 @@ def create_performance_attribution_tab(df_tiered):
         col1, col2 = st.columns([2, 1])
         
         with col1:
-            fig_alpha_beta = px.scatter(
-                alpha_beta_df,
-                x='Beta',
-                y='Alpha (%)',
-                size='R-Squared',
-                color='Information Ratio',
-                hover_name='Fund',
-                title="Alpha vs Beta Analysis",
-                color_continuous_scale='RdYlBu_r'
-            )
-            
-            # Add quadrant lines
-            fig_alpha_beta.add_hline(y=0, line_dash="dash", line_color="gray")
-            fig_alpha_beta.add_vline(x=1, line_dash="dash", line_color="gray")
-            
-            # Add quadrant labels
-            fig_alpha_beta.add_annotation(x=1.3, y=max(alpha_beta_df['Alpha (%)']), text="High Beta<br>High Alpha", showarrow=False)
-            fig_alpha_beta.add_annotation(x=0.7, y=max(alpha_beta_df['Alpha (%)']), text="Low Beta<br>High Alpha", showarrow=False)
-            
-            fig_alpha_beta.update_layout(height=500)
-            st.plotly_chart(fig_alpha_beta, use_container_width=True)
+            try:
+                # Validate alpha_beta_df data
+                required_cols = ['Beta', 'Alpha (%)', 'R-Squared', 'Information Ratio', 'Fund']
+                
+                if not all(col in alpha_beta_df.columns for col in required_cols):
+                    st.warning("Alpha/Beta data incomplete - displaying available data")
+                    available_cols = [col for col in required_cols if col in alpha_beta_df.columns]
+                    if len(available_cols) >= 3:  # Need at least x, y, and name
+                        # Simplified scatter plot
+                        fig_alpha_beta = px.scatter(
+                            alpha_beta_df,
+                            x=available_cols[0] if 'Beta' in available_cols else available_cols[0],
+                            y=available_cols[1] if 'Alpha (%)' in available_cols else available_cols[1],
+                            hover_name='Fund' if 'Fund' in available_cols else None,
+                            title="Alpha vs Beta Analysis (Simplified)"
+                        )
+                    else:
+                        raise ValueError("Insufficient data for scatter plot")
+                else:
+                    # Clean and validate data
+                    plot_df = alpha_beta_df.copy()
+                    
+                    # Ensure numeric columns are numeric and handle inf/-inf
+                    numeric_cols = ['Beta', 'Alpha (%)', 'R-Squared', 'Information Ratio']
+                    for col in numeric_cols:
+                        if col in plot_df.columns:
+                            plot_df[col] = pd.to_numeric(plot_df[col], errors='coerce')
+                            plot_df[col] = plot_df[col].replace([np.inf, -np.inf], np.nan)
+                    
+                    # Remove rows with NaN in essential columns
+                    plot_df = plot_df.dropna(subset=['Beta', 'Alpha (%)'])
+                    
+                    if len(plot_df) == 0:
+                        st.warning("No valid data for Alpha/Beta analysis")
+                        fig_alpha_beta = None
+                    else:
+                        # Handle size column - ensure positive values
+                        if 'R-Squared' in plot_df.columns and plot_df['R-Squared'].notna().any():
+                            plot_df['Size_Value'] = np.abs(plot_df['R-Squared']) + 0.01
+                            size_col = 'Size_Value'
+                        else:
+                            size_col = None
+                        
+                        # Handle color column
+                        color_col = 'Information Ratio' if 'Information Ratio' in plot_df.columns and plot_df['Information Ratio'].notna().any() else None
+                        
+                        fig_alpha_beta = px.scatter(
+                            plot_df,
+                            x='Beta',
+                            y='Alpha (%)',
+                            size=size_col,
+                            color=color_col,
+                            hover_name='Fund',
+                            title="Alpha vs Beta Analysis",
+                            color_continuous_scale='RdYlBu_r' if color_col else None
+                        )
+                
+                if fig_alpha_beta:
+                    # Add quadrant lines
+                    fig_alpha_beta.add_hline(y=0, line_dash="dash", line_color="gray", annotation_text="Market Alpha")
+                    fig_alpha_beta.add_vline(x=1, line_dash="dash", line_color="gray", annotation_text="Market Beta")
+                    
+                    # Add quadrant labels (with safe max calculation)
+                    try:
+                        max_alpha = alpha_beta_df['Alpha (%)'].max() if not alpha_beta_df.empty else 1
+                        fig_alpha_beta.add_annotation(x=1.3, y=max_alpha, text="High Beta<br>High Alpha", showarrow=False)
+                        fig_alpha_beta.add_annotation(x=0.7, y=max_alpha, text="Low Beta<br>High Alpha", showarrow=False)
+                    except:
+                        pass  # Skip annotations if data issues
+                    
+                    fig_alpha_beta.update_layout(height=500)
+                    st.plotly_chart(fig_alpha_beta, use_container_width=True)
+                else:
+                    st.warning("Unable to create Alpha/Beta scatter plot - displaying data table instead")
+                    if not alpha_beta_df.empty:
+                        st.dataframe(alpha_beta_df.round(3), use_container_width=True, hide_index=True)
+                        
+            except Exception as e:
+                st.error(f"Error creating Alpha/Beta analysis: {str(e)}")
+                st.info("Displaying fallback analysis...")
+                
+                # Fallback display
+                if not alpha_beta_df.empty:
+                    st.markdown("#### 📋 Alpha/Beta Data")
+                    display_cols = ['Fund', 'Alpha (%)', 'Beta', 'R-Squared', 'Information Ratio']
+                    available_cols = [col for col in display_cols if col in alpha_beta_df.columns]
+                    if available_cols:
+                        st.dataframe(
+                            alpha_beta_df[available_cols].round(3),
+                            use_container_width=True,
+                            hide_index=True
+                        )
         
         with col2:
             st.markdown("#### 🎯 **Alpha/Beta Insights**")
@@ -2917,24 +3103,104 @@ def create_performance_attribution_tab(df_tiered):
             st.plotly_chart(fig_excess, use_container_width=True)
         
         with col2:
-            # Upside/Downside capture
-            fig_capture = px.scatter(
-                benchmark_df,
-                x='Upside Capture',
-                y='Downside Capture',
-                size='Excess Return (%)',
-                color='Fund',
-                title="Upside/Downside Capture Analysis",
-                hover_name='Fund'
-            )
-            
-            # Add ideal quadrant lines
-            fig_capture.add_hline(y=1, line_dash="dash", line_color="gray")
-            fig_capture.add_vline(x=1, line_dash="dash", line_color="gray")
-            fig_capture.add_annotation(x=1.1, y=0.9, text="Ideal:<br>High Up,<br>Low Down", showarrow=False)
-            
-            fig_capture.update_layout(height=400)
-            st.plotly_chart(fig_capture, use_container_width=True)
+            # Upside/Downside capture with comprehensive data validation
+            try:
+                # Debug information (can be commented out in production)
+                # st.write("DEBUG - benchmark_df dtypes:", benchmark_df.dtypes)
+                # st.write("DEBUG - benchmark_df head:", benchmark_df.head())
+                
+                # Data validation and cleaning
+                required_cols = ['Upside Capture', 'Downside Capture', 'Excess Return (%)', 'Fund']
+                
+                # Check if all required columns exist
+                missing_cols = [col for col in required_cols if col not in benchmark_df.columns]
+                if missing_cols:
+                    st.error(f"Missing columns for scatter plot: {missing_cols}")
+                else:
+                    # Clean the data for scatter plot
+                    plot_df = benchmark_df.copy()
+                    
+                    # Ensure numeric columns are actually numeric and remove inf/-inf
+                    numeric_cols = ['Upside Capture', 'Downside Capture', 'Excess Return (%)']
+                    for col in numeric_cols:
+                        if col in plot_df.columns:
+                            # Convert to numeric, coercing errors to NaN
+                            plot_df[col] = pd.to_numeric(plot_df[col], errors='coerce')
+                            # Replace inf/-inf with NaN
+                            plot_df[col] = plot_df[col].replace([np.inf, -np.inf], np.nan)
+                    
+                    # Remove rows with NaN values in key columns
+                    plot_df = plot_df.dropna(subset=['Upside Capture', 'Downside Capture'])
+                    
+                    # Ensure we have data to plot
+                    if len(plot_df) == 0:
+                        st.warning("No valid data available for Upside/Downside Capture analysis")
+                    else:
+                        # Handle size parameter - ensure positive values for size
+                        if 'Excess Return (%)' in plot_df.columns:
+                            # For size parameter, we need positive values
+                            plot_df['Size_Value'] = np.abs(plot_df['Excess Return (%)']) + 0.1  # Add small offset for zero values
+                            size_col = 'Size_Value'
+                        else:
+                            size_col = None
+                        
+                        # Create scatter plot with validated data
+                        fig_capture = px.scatter(
+                            plot_df,
+                            x='Upside Capture',
+                            y='Downside Capture',
+                            size=size_col,
+                            color='Fund',
+                            title="Upside/Downside Capture Analysis",
+                            hover_name='Fund',
+                            hover_data=['Excess Return (%)'] if 'Excess Return (%)' in plot_df.columns else None
+                        )
+                        
+                        # Add ideal quadrant lines
+                        fig_capture.add_hline(y=1, line_dash="dash", line_color="gray", annotation_text="Perfect Downside Protection")
+                        fig_capture.add_vline(x=1, line_dash="dash", line_color="gray", annotation_text="Perfect Upside Capture")
+                        
+                        # Add quadrant annotation
+                        fig_capture.add_annotation(
+                            x=max(plot_df['Upside Capture'].max() * 0.9, 1.1), 
+                            y=min(plot_df['Downside Capture'].min() * 1.1, 0.9), 
+                            text="Ideal Zone:<br>High Upside<br>Low Downside", 
+                            showarrow=False,
+                            bgcolor="rgba(255,255,255,0.8)",
+                            bordercolor="gray",
+                            borderwidth=1
+                        )
+                        
+                        fig_capture.update_layout(
+                            height=400,
+                            xaxis_title="Upside Capture Ratio",
+                            yaxis_title="Downside Capture Ratio"
+                        )
+                        st.plotly_chart(fig_capture, use_container_width=True)
+                        
+                        # Add interpretation guide
+                        st.markdown("""
+                        **📊 Interpretation Guide:**
+                        - **Upside Capture > 1.0**: Fund captures more than 100% of market gains
+                        - **Downside Capture < 1.0**: Fund loses less than 100% of market declines  
+                        - **Ideal Position**: Top-left quadrant (high upside, low downside)
+                        """)
+                        
+            except Exception as e:
+                st.error(f"Error creating Upside/Downside Capture chart: {str(e)}")
+                st.info("Displaying alternative analysis...")
+                
+                # Fallback: Simple table display
+                if not benchmark_df.empty:
+                    st.markdown("#### 📋 Capture Ratio Data")
+                    display_cols = ['Fund', 'Upside Capture', 'Downside Capture', 'Excess Return (%)']
+                    available_cols = [col for col in display_cols if col in benchmark_df.columns]
+                    if available_cols:
+                        st.dataframe(
+                            benchmark_df[available_cols].round(3),
+                            use_container_width=True,
+                            hide_index=True
+                        )
         
         # Performance summary
         st.markdown("#### 📊 **Benchmark Comparison Summary**")
