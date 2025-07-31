@@ -1,6 +1,6 @@
 # ─── 0) STREAMLIT CONFIG & LIBRARIES ───────────────────────────────────────
 import streamlit as st
-st.set_page_config(page_title="Fund Dashboard", layout="wide", page_icon="📊")
+st.set_page_config(page_title="Semi Liquid Alternatives Fund Dashboard", layout="wide", page_icon="🏦")
 
 # Custom CSS for enhanced styling
 st.markdown("""
@@ -934,13 +934,19 @@ def create_main_rankings_tab(df_tiered):
     # Professional header
     st.markdown("""
     <div class="main-header">
-        <h1>🏆 Professional Fund Rankings Dashboard</h1>
-        <p>Advanced quantitative analysis and performance scoring</p>
+        <h1>🏦 Semi-Liquid Alternatives Fund Selection Dashboard</h1>
+        <p>Advanced quantitative analysis and performance scoring for alternative investments</p>
     </div>
     """, unsafe_allow_html=True)
     
     # Enhanced sidebar filters
     with st.sidebar:
+        # Version indicator
+        st.markdown("---")
+        st.markdown("**🚀 Phase 2 - Enhanced Analytics**")
+        st.caption("✨ Advanced scoring, comparisons, and interactive features")
+        st.markdown("---")
+        
         st.markdown("### 🔍 **Smart Filters**")
         st.caption("🎯 Use filters to find funds matching your criteria")
         
@@ -1153,6 +1159,45 @@ def create_main_rankings_tab(df_tiered):
                     )
                     fig_comparison.update_layout(height=400, showlegend=False)
                     st.plotly_chart(fig_comparison, use_container_width=True)
+        
+        # Phase 3 Roadmap Preview
+        st.markdown("---")
+        with st.expander("🚀 **Phase 3 Roadmap - Coming Soon**", expanded=False):
+            st.markdown("### 🎯 **Advanced Features in Development**")
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("""
+                **📊 Performance Attribution:**
+                • Factor-based return decomposition
+                • Style drift analysis
+                • Benchmark relative performance
+                • Risk-adjusted attribution
+                
+                **🎯 Risk-Return Optimization:**
+                • Modern Portfolio Theory integration
+                • Efficient frontier visualization
+                • Monte Carlo simulations
+                • VaR/CVaR calculations
+                """)
+            
+            with col2:
+                st.markdown("""
+                **🔗 Correlation Analysis:**
+                • Cross-fund correlation matrices
+                • Market regime analysis
+                • Diversification benefit scoring
+                • Dynamic correlation tracking
+                
+                **🏗️ Custom Portfolio Builder:**
+                • Drag-and-drop portfolio construction
+                • Weight optimization tools
+                • Constraint-based allocation
+                • Real-time portfolio analytics
+                """)
+            
+            st.info("💡 **Next Update:** Phase 3 will transform this into a comprehensive portfolio construction and risk management platform!")
         
     
     # Apply filters
@@ -1607,6 +1652,155 @@ def create_basic_data_quality_tab(df_tiered):
     else:
         st.info("No data available")
 
+# ─── PHASE 3 PLACEHOLDER FUNCTIONS ────────────────────────────────────────────
+
+def create_performance_attribution_placeholder():
+    """Placeholder for Phase 3 Performance Attribution features"""
+    st.title("📊 Performance Attribution Analysis")
+    
+    # Coming soon notice
+    st.info("🚀 **Phase 3 Feature - Coming Soon!**")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("""
+        ## 🎯 **Planned Features:**
+        
+        ### 📈 **Factor-Based Analysis**
+        - Return decomposition by risk factors
+        - Style drift detection and analysis
+        - Market timing vs. security selection
+        - Alpha and beta attribution
+        
+        ### 📊 **Benchmark Comparison**
+        - Relative performance tracking
+        - Tracking error analysis
+        - Information ratio calculations
+        - Rolling attribution windows
+        """)
+    
+    with col2:
+        st.markdown("""
+        ## 🔧 **Advanced Analytics:**
+        
+        ### 🎨 **Interactive Visualizations**
+        - Attribution waterfall charts
+        - Factor exposure heatmaps
+        - Time-series attribution plots
+        - Risk-return scatter analysis
+        
+        ### 📋 **Detailed Reports**
+        - Monthly attribution summaries
+        - Sector/style attribution
+        - Currency impact analysis
+        - Custom benchmark creation
+        """)
+    
+    # Mockup visualization placeholder
+    st.markdown("---")
+    st.markdown("### 🎨 **Preview: Attribution Waterfall Chart**")
+    st.image("https://via.placeholder.com/800x400/4CAF50/FFFFFF?text=Attribution+Waterfall+Chart+%28Phase+3%29", 
+             caption="Interactive attribution analysis coming in Phase 3")
+
+def create_portfolio_builder_placeholder():
+    """Placeholder for Phase 3 Portfolio Builder features"""
+    st.title("🎯 Custom Portfolio Builder")
+    
+    # Coming soon notice
+    st.info("🚀 **Phase 3 Feature - Coming Soon!**")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("""
+        ## 🏗️ **Portfolio Construction:**
+        
+        ### 🎛️ **Interactive Builder**
+        - Drag-and-drop fund selection
+        - Real-time weight adjustment
+        - Constraint-based optimization
+        - Target allocation modeling
+        
+        ### 📊 **Optimization Tools**
+        - Mean-variance optimization
+        - Risk parity allocation
+        - Black-Litterman integration
+        - Custom objective functions
+        """)
+    
+    with col2:
+        st.markdown("""
+        ## 📈 **Portfolio Analytics:**
+        
+        ### 🔍 **Real-Time Metrics**
+        - Expected return calculations
+        - Risk (volatility) projections
+        - Sharpe ratio optimization
+        - Diversification ratios
+        
+        ### 🎨 **Visualization Suite**
+        - Efficient frontier plots
+        - Asset allocation pie charts
+        - Risk contribution analysis
+        - Correlation matrix heatmaps
+        """)
+    
+    # Mockup visualization placeholder
+    st.markdown("---")
+    st.markdown("### 🎨 **Preview: Portfolio Construction Interface**")
+    st.image("https://via.placeholder.com/800x400/2196F3/FFFFFF?text=Interactive+Portfolio+Builder+%28Phase+3%29", 
+             caption="Drag-and-drop portfolio construction coming in Phase 3")
+
+def create_risk_analytics_placeholder():
+    """Placeholder for Phase 3 Risk Analytics features"""
+    st.title("🔗 Advanced Risk Analytics")
+    
+    # Coming soon notice
+    st.info("🚀 **Phase 3 Feature - Coming Soon!**")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("""
+        ## 🔗 **Correlation Analysis:**
+        
+        ### 📊 **Cross-Fund Analysis**
+        - Dynamic correlation matrices
+        - Rolling correlation windows
+        - Regime-based correlations
+        - Tail dependency measures
+        
+        ### 🌐 **Market Regime Detection**
+        - Bull/bear market identification
+        - Volatility regime analysis
+        - Crisis period detection
+        - Structural break analysis
+        """)
+    
+    with col2:
+        st.markdown("""
+        ## ⚠️ **Risk Management:**
+        
+        ### 📉 **VaR & Risk Metrics**
+        - Value at Risk (VaR) calculations
+        - Conditional VaR (Expected Shortfall)
+        - Maximum Drawdown analysis
+        - Stress testing scenarios
+        
+        ### 🎯 **Monte Carlo Simulations**
+        - Return distribution modeling
+        - Scenario generation
+        - Path-dependent analytics
+        - Confidence interval estimation
+        """)
+    
+    # Mockup visualization placeholder
+    st.markdown("---")
+    st.markdown("### 🎨 **Preview: Risk Analytics Dashboard**")
+    st.image("https://via.placeholder.com/800x400/FF9800/FFFFFF?text=Advanced+Risk+Analytics+%28Phase+3%29", 
+             caption="Comprehensive risk analysis coming in Phase 3")
+
 # ─── SIMPLIFIED DASHBOARD FUNCTION (STABLE VERSION) ────────────────────────────────────────────
 def create_dashboard():
     # Add cache control button
@@ -1654,10 +1848,13 @@ def create_dashboard():
     st.sidebar.text(f"Tier 1: ≥ {tier1_thresh:.2f}" if isinstance(tier1_thresh, (int, float)) else f"Tier 1: {tier1_thresh}")
     st.sidebar.text(f"Tier 2: ≥ {tier2_thresh:.2f}" if isinstance(tier2_thresh, (int, float)) else f"Tier 2: {tier2_thresh}")
     
-    # Simplified tabbed interface for stability
-    tab1, tab2 = st.tabs([
-        "🏆 Main Dashboard", 
-        "🛡️ Data Quality (Basic)"
+    # Enhanced tabbed interface with Phase 3 preparation
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "🏆 Fund Rankings", 
+        "🛡️ Data Quality",
+        "📊 Performance Attribution*",
+        "🎯 Portfolio Builder*",
+        "🔗 Risk Analytics*"
     ])
     
     with tab1:
@@ -1665,6 +1862,15 @@ def create_dashboard():
     
     with tab2:
         create_basic_data_quality_tab(df_tiered)
+    
+    with tab3:
+        create_performance_attribution_placeholder()
+    
+    with tab4:
+        create_portfolio_builder_placeholder()
+    
+    with tab5:
+        create_risk_analytics_placeholder()
 
 # ─── LEGACY FUNCTION - REMOVED (replaced by tabbed interface) ───
 
