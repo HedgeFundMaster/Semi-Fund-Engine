@@ -39,16 +39,22 @@ class GoogleSheetsLoader:
         """Get authenticated gspread client with caching"""
         try:
             # Try to load credentials from Streamlit secrets
+            # First check if credentials are nested under gcp_service_account
             if "gcp_service_account" in st.secrets:
                 credentials_dict = st.secrets["gcp_service_account"]
-                credentials = Credentials.from_service_account_info(
-                    credentials_dict, scopes=SCOPES
-                )
-                return gspread.authorize(credentials)
+            # Otherwise, assume credentials are at the top level
+            elif all(key in st.secrets for key in ["type", "project_id", "private_key", "client_email"]):
+                credentials_dict = dict(st.secrets)
             else:
                 st.error("❌ Google Sheets credentials not found in secrets")
-                st.info("Please add 'gcp_service_account' to your Streamlit secrets")
+                st.info("Please add Google service account credentials to your Streamlit secrets")
                 return None
+            
+            # Create credentials
+            credentials = Credentials.from_service_account_info(
+                credentials_dict, scopes=SCOPES
+            )
+            return gspread.authorize(credentials)
                 
         except Exception as e:
             logger.error(f"Failed to create gspread client: {str(e)}")
