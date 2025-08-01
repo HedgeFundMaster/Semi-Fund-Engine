@@ -197,6 +197,68 @@ class DataFrameSchema:
                     validation_results['numeric_issues'].append(f"{col}: {str(e)}")
         
         return validation_results
+    
+    @staticmethod
+    def validate_aum_data(df: pd.DataFrame) -> Dict[str, Any]:
+        """
+        Specific validation for AUM data quality and scoring fairness
+        
+        Args:
+            df: DataFrame to validate
+            
+        Returns:
+            Dictionary with AUM validation results
+        """
+        aum_validation = {
+            'total_funds': len(df) if df is not None else 0,
+            'missing_aum_count': 0,
+            'missing_aum_funds': [],
+            'invalid_aum_count': 0,
+            'invalid_aum_funds': [],
+            'valid_aum_count': 0,
+            'missing_percentage': 0.0,
+            'recommendations': []
+        }
+        
+        if df is None or df.empty:
+            return aum_validation
+            
+        if StandardColumns.AUM not in df.columns:
+            aum_validation['recommendations'].append("AUM column not found - funds will get neutral (0.5) AUM scores")
+            return aum_validation
+        
+        aum_series = df[StandardColumns.AUM]
+        fund_names = df.get(StandardColumns.FUND, df.index)
+        
+        # Check for missing AUM data
+        missing_mask = aum_series.isna()
+        aum_validation['missing_aum_count'] = missing_mask.sum()
+        aum_validation['missing_aum_funds'] = fund_names[missing_mask].tolist()
+        
+        # Check for invalid AUM data (negative or zero values)
+        valid_aum = pd.to_numeric(aum_series, errors='coerce')
+        invalid_mask = (valid_aum <= 0) & (~valid_aum.isna())
+        aum_validation['invalid_aum_count'] = invalid_mask.sum()
+        aum_validation['invalid_aum_funds'] = fund_names[invalid_mask].tolist()
+        
+        # Count valid AUM data
+        valid_mask = (valid_aum > 0)
+        aum_validation['valid_aum_count'] = valid_mask.sum()
+        
+        # Calculate missing percentage
+        total_funds = len(df)
+        missing_total = aum_validation['missing_aum_count'] + aum_validation['invalid_aum_count']
+        aum_validation['missing_percentage'] = (missing_total / total_funds) * 100 if total_funds > 0 else 0
+        
+        # Generate recommendations
+        if aum_validation['missing_percentage'] > 30:
+            aum_validation['recommendations'].append(f"High missing AUM rate ({aum_validation['missing_percentage']:.1f}%) - many funds will get neutral scores")
+        if aum_validation['missing_percentage'] > 0:
+            aum_validation['recommendations'].append("Funds with missing AUM will receive fair neutral scores (0.5) to avoid penalties")
+        if aum_validation['invalid_aum_count'] > 0:
+            aum_validation['recommendations'].append(f"{aum_validation['invalid_aum_count']} funds have invalid AUM values (≤0)")
+            
+        return aum_validation
 
 # ─── DATA QUALITY FUNCTIONS ─────────────────────────────────────────────────
 

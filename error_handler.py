@@ -486,3 +486,66 @@ def show_data_quality_warnings(df: pd.DataFrame):
         with st.expander("⚠️ Data Quality Warnings", expanded=False):
             for warning in warnings:
                 st.warning(warning)
+
+def show_aum_scoring_warnings(aum_validation: Dict[str, Any]):
+    """
+    Show AUM-specific scoring warnings to ensure fairness transparency
+    
+    Args:
+        aum_validation: AUM validation results from data_models.validate_aum_data()
+    """
+    if not aum_validation or aum_validation['total_funds'] == 0:
+        return
+    
+    missing_count = aum_validation.get('missing_aum_count', 0) + aum_validation.get('invalid_aum_count', 0)
+    
+    if missing_count > 0:
+        st.info(f"📊 **AUM Scoring Fairness**: {missing_count} of {aum_validation['total_funds']} funds have missing/invalid AUM data and will receive **neutral AUM scores (0.5)** to ensure fair comparison.")
+        
+        with st.expander("🔍 AUM Data Details", expanded=False):
+            if aum_validation.get('missing_aum_count', 0) > 0:
+                st.write(f"**Missing AUM Data:** {aum_validation['missing_aum_count']} funds")
+                missing_funds = aum_validation.get('missing_aum_funds', [])
+                if missing_funds and len(missing_funds) <= 10:
+                    st.write("Missing AUM funds:", ", ".join(missing_funds))
+                elif len(missing_funds) > 10:
+                    st.write(f"Missing AUM funds: {', '.join(missing_funds[:10])}... and {len(missing_funds)-10} more")
+            
+            if aum_validation.get('invalid_aum_count', 0) > 0:
+                st.write(f"**Invalid AUM Data:** {aum_validation['invalid_aum_count']} funds (≤0 values)")
+                invalid_funds = aum_validation.get('invalid_aum_funds', [])
+                if invalid_funds and len(invalid_funds) <= 10:
+                    st.write("Invalid AUM funds:", ", ".join(invalid_funds))
+                elif len(invalid_funds) > 10:
+                    st.write(f"Invalid AUM funds: {', '.join(invalid_funds[:10])}... and {len(invalid_funds)-10} more")
+            
+            st.write(f"**Valid AUM Data:** {aum_validation.get('valid_aum_count', 0)} funds")
+            
+            for recommendation in aum_validation.get('recommendations', []):
+                st.info(f"💡 {recommendation}")
+
+def log_aum_scoring_summary(aum_validation: Dict[str, Any]):
+    """
+    Log summary of AUM scoring decisions for debugging and monitoring
+    
+    Args:
+        aum_validation: AUM validation results
+    """
+    if not aum_validation:
+        return
+        
+    total = aum_validation.get('total_funds', 0)
+    missing = aum_validation.get('missing_aum_count', 0)
+    invalid = aum_validation.get('invalid_aum_count', 0)
+    valid = aum_validation.get('valid_aum_count', 0)
+    
+    logger.info(f"AUM Scoring Summary: {total} total funds, {valid} valid AUM, {missing} missing AUM, {invalid} invalid AUM")
+    logger.info(f"Neutral AUM scores (0.5) assigned to {missing + invalid} funds for fairness")
+    
+    if missing > 0:
+        missing_funds = aum_validation.get('missing_aum_funds', [])
+        logger.info(f"Funds with missing AUM getting neutral scores: {missing_funds[:5]}{'...' if len(missing_funds) > 5 else ''}")
+    
+    if invalid > 0:
+        invalid_funds = aum_validation.get('invalid_aum_funds', [])
+        logger.info(f"Funds with invalid AUM getting neutral scores: {invalid_funds[:5]}{'...' if len(invalid_funds) > 5 else ''}")

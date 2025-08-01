@@ -14,8 +14,8 @@ import streamlit as st
 from typing import Dict, List, Optional, Tuple
 import logging
 
-from data_models import StandardColumns
-from error_handler import SafeDataAccess
+from data_models import StandardColumns, DataFrameSchema
+from error_handler import SafeDataAccess, show_aum_scoring_warnings, log_aum_scoring_summary
 from error_handler import handle_errors, ValidationHandler, ErrorMessages
 
 # Configure logging
@@ -215,6 +215,11 @@ class CompositeScorer:
             if pd.notna(aum) and aum > 0:
                 log_aum = np.log10(aum)
                 score_components['aum'] = self._normalize_metric(log_aum, 0, 4)
+            else:
+                # Assign neutral score (0.5) for missing AUM to avoid unfair penalty
+                score_components['aum'] = 0.5
+                if pd.isna(aum):
+                    logger.info(f"Fund '{fund_data.get(StandardColumns.FUND, 'Unknown')}' has missing AUM, assigned neutral score (0.5)")
             
             # Expense ratio component (inverted - lower is better)
             expense_ratio = fund_data.get(StandardColumns.EXPENSE_RATIO, np.nan)
@@ -290,6 +295,11 @@ class CompositeScorer:
             return df
             
         df_scored = df.copy()
+        
+        # Validate AUM data and show warnings for transparency
+        aum_validation = DataFrameSchema.validate_aum_data(df_scored)
+        show_aum_scoring_warnings(aum_validation)
+        log_aum_scoring_summary(aum_validation)
         
         # Calculate composite scores
         scores = []
