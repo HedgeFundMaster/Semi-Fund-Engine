@@ -18,7 +18,7 @@ from data_loader import load_fund_data, load_app_config, refresh_data_cache
 from scoring_engine import score_fund_universe, get_top_performers, get_funds_by_tier
 from ui_components import (
     DashboardTheme, HeaderComponents, DataDisplayComponents, 
-    ChartComponents, InteractiveComponents, LayoutComponents
+    ChartComponents, InteractiveComponents, LayoutComponents, FundDetailComponents
 )
 
 # Configure logging
@@ -427,6 +427,43 @@ def main():
     # Apply filters to data
     filtered_data = LayoutComponents.apply_filters(scored_data, filters)
     
+    # Fund Detail Breakdown Feature
+    st.sidebar.markdown("---")
+    st.sidebar.header("🔍 Fund Detail Analysis")
+    
+    # Fund selection for detailed analysis
+    fund_analysis_option = st.sidebar.selectbox(
+        "Search by:",
+        ["Fund Name", "Ticker"],
+        help="Choose how to search for funds"
+    )
+    
+    if fund_analysis_option == "Fund Name" and StandardColumns.FUND in scored_data.columns:
+        available_funds = sorted(scored_data[StandardColumns.FUND].dropna().unique().tolist())
+        identifier_type = "fund_name"
+    elif fund_analysis_option == "Ticker" and 'Ticker' in scored_data.columns:
+        available_funds = sorted(scored_data['Ticker'].dropna().unique().tolist())
+        identifier_type = "ticker"
+    else:
+        available_funds = []
+        identifier_type = "fund_name"
+    
+    if available_funds:
+        selected_fund = st.sidebar.selectbox(
+            f"Select Fund ({len(available_funds)} available):",
+            [""] + available_funds,
+            help="Choose a fund for detailed score breakdown and analysis"
+        )
+        
+        if selected_fund:
+            if st.sidebar.button(f"📊 Analyze {selected_fund}", use_container_width=True):
+                st.session_state.selected_fund_analysis = {
+                    'fund': selected_fund,
+                    'type': identifier_type
+                }
+    else:
+        st.sidebar.info("No funds available for detailed analysis")
+    
     # Data refresh option
     st.sidebar.markdown("---")
     if st.sidebar.button("🔄 Refresh Data"):
@@ -456,6 +493,24 @@ def main():
     
     with tabs[4]:
         create_risk_analytics_tab(filtered_data)
+    
+    # Fund Detail Breakdown Display
+    if 'selected_fund_analysis' in st.session_state:
+        fund_analysis = st.session_state.selected_fund_analysis
+        st.markdown("---")
+        
+        # Display comprehensive fund breakdown
+        success = FundDetailComponents.fund_detail_breakdown(
+            scored_data, 
+            fund_analysis['fund'], 
+            fund_analysis['type']
+        )
+        
+        if success:
+            # Add option to clear analysis
+            if st.button("🔙 Clear Fund Analysis", type="secondary"):
+                del st.session_state.selected_fund_analysis
+                st.experimental_rerun()
     
     # Footer
     st.markdown("---")

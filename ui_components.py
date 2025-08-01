@@ -606,3 +606,391 @@ class LayoutComponents:
                 metrics["Avg Return"] = f"{valid_returns.mean():.1f}%"
         
         HeaderComponents.display_metrics_row(metrics)
+
+# ─── FUND DETAIL BREAKDOWN COMPONENTS ───────────────────────────────────────
+
+class FundDetailComponents:
+    """Components for detailed individual fund analysis and score transparency"""
+    
+    @staticmethod
+    def fund_detail_breakdown(df: pd.DataFrame, fund_identifier: str, 
+                            identifier_type: str = "fund_name") -> bool:
+        """
+        Display comprehensive breakdown of individual fund scoring and analysis
+        
+        Args:
+            df: DataFrame containing fund data
+            fund_identifier: Fund name or ticker to analyze
+            identifier_type: "fund_name" or "ticker"
+            
+        Returns:
+            True if fund found and displayed, False otherwise
+        """
+        if not ValidationHandler.validate_dataframe_basic(df, "fund detail analysis"):
+            return False
+            
+        # Find the fund
+        if identifier_type == "fund_name" and StandardColumns.FUND in df.columns:
+            fund_row = df[df[StandardColumns.FUND] == fund_identifier]
+        elif identifier_type == "ticker" and 'Ticker' in df.columns:
+            fund_row = df[df['Ticker'] == fund_identifier]
+        else:
+            st.error(f"Cannot search by {identifier_type} - column not available")
+            return False
+            
+        if fund_row.empty:
+            st.warning(f"Fund '{fund_identifier}' not found in dataset")
+            return False
+            
+        fund_data = fund_row.iloc[0]
+        fund_name = SafeDataAccess.safe_get_column(pd.DataFrame([fund_data]), StandardColumns.FUND, 'Unknown').iloc[0]
+        
+        # Display fund header
+        st.markdown(f"# 🔍 Fund Analysis: **{fund_name}**")
+        st.markdown("---")
+        
+        # Overview metrics
+        FundDetailComponents._display_fund_overview(fund_data)
+        
+        # Score breakdown
+        FundDetailComponents._display_score_breakdown(fund_data, df)
+        
+        # Tier analysis
+        FundDetailComponents._display_tier_analysis(fund_data, df)
+        
+        # Data quality indicators
+        FundDetailComponents._display_data_quality_indicators(fund_data)
+        
+        # Category comparison
+        FundDetailComponents._display_category_comparison(fund_data, df)
+        
+        return True
+    
+    @staticmethod
+    def _display_fund_overview(fund_data: pd.Series):
+        """Display basic fund overview metrics"""
+        
+        st.subheader("📊 Fund Overview")
+        
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            score = fund_data.get(StandardColumns.SCORE, 0)
+            score_color = "🟢" if score >= 75 else "🟡" if score >= 50 else "🔴"
+            st.metric("Composite Score", f"{score:.1f}", help="Overall weighted score (0-100)")
+            st.write(f"{score_color} Score Level")
+            
+        with col2:
+            tier = fund_data.get(StandardColumns.TIER, 'N/A')
+            tier_emoji = {"Tier 1": "🥇", "Tier 2": "🥈", "Tier 3": "🥉"}.get(tier, "❓")
+            st.metric("Performance Tier", tier)
+            st.write(f"{tier_emoji} Tier Classification")
+            
+        with col3:
+            total_return = fund_data.get(StandardColumns.TOTAL_RETURN, 0)
+            st.metric("Total Return", f"{total_return:.2f}%", help="Absolute performance")
+            
+        with col4:
+            volatility = fund_data.get(StandardColumns.VOLATILITY, 0)
+            st.metric("Volatility", f"{volatility:.2f}%", help="Risk measure")
+    
+    @staticmethod
+    def _display_score_breakdown(fund_data: pd.Series, df: pd.DataFrame):
+        """Display detailed score component breakdown with visual chart"""
+        
+        st.subheader("⭐ Score Component Breakdown")
+        
+        # Import scoring configuration
+        from scoring_engine import ScoringConfig, CompositeScorer
+        
+        config = ScoringConfig()
+        scorer = CompositeScorer(config)
+        
+        # Calculate individual component scores
+        score_components = {}
+        component_explanations = {}
+        
+        # Total return component
+        total_return = fund_data.get(StandardColumns.TOTAL_RETURN, np.nan)
+        if pd.notna(total_return):
+            normalized_score = scorer._normalize_metric(total_return, 0, 30)
+            weight = config.METRIC_WEIGHTS['total_return']
+            score_components['Total Return'] = normalized_score * weight * 100
+            component_explanations['Total Return'] = f"{total_return:.2f}% return → {normalized_score:.3f} normalized → {score_components['Total Return']:.1f} weighted points"
+        else:
+            component_explanations['Total Return'] = "Missing data - not included in score"
+        
+        # Sharpe ratio component
+        sharpe = fund_data.get(StandardColumns.SHARPE_RATIO, np.nan)
+        if pd.notna(sharpe):
+            normalized_score = scorer._normalize_metric(sharpe, -2, 3)
+            weight = config.METRIC_WEIGHTS['sharpe_composite']
+            score_components['Sharpe Ratio'] = normalized_score * weight * 100
+            component_explanations['Sharpe Ratio'] = f"{sharpe:.3f} ratio → {normalized_score:.3f} normalized → {score_components['Sharpe Ratio']:.1f} weighted points"
+        else:
+            component_explanations['Sharpe Ratio'] = "Missing data - not included in score"
+        
+        # Sortino ratio component
+        sortino = fund_data.get(StandardColumns.SORTINO_RATIO, np.nan)
+        if pd.notna(sortino):
+            normalized_score = scorer._normalize_metric(sortino, -2, 4)
+            weight = config.METRIC_WEIGHTS['sortino_composite']
+            score_components['Sortino Ratio'] = normalized_score * weight * 100
+            component_explanations['Sortino Ratio'] = f"{sortino:.3f} ratio → {normalized_score:.3f} normalized → {score_components['Sortino Ratio']:.1f} weighted points"
+        else:
+            component_explanations['Sortino Ratio'] = "Missing data - not included in score"
+        
+        # AUM component
+        aum = fund_data.get(StandardColumns.AUM, np.nan)
+        weight = config.METRIC_WEIGHTS['aum']
+        if pd.notna(aum) and aum > 0:
+            log_aum = np.log10(aum)
+            normalized_score = scorer._normalize_metric(log_aum, 0, 4)
+            score_components['AUM Factor'] = normalized_score * weight * 100
+            component_explanations['AUM Factor'] = f"${aum:,.0f}M → log={log_aum:.2f} → {normalized_score:.3f} normalized → {score_components['AUM Factor']:.1f} weighted points"
+        else:
+            score_components['AUM Factor'] = 0.5 * weight * 100  # Neutral score
+            if pd.isna(aum):
+                component_explanations['AUM Factor'] = f"Missing AUM data → 0.5 neutral score → {score_components['AUM Factor']:.1f} weighted points (fair treatment)"
+            else:
+                component_explanations['AUM Factor'] = f"Invalid AUM (${aum}) → 0.5 neutral score → {score_components['AUM Factor']:.1f} weighted points (fair treatment)"
+        
+        # Expense ratio component
+        expense_ratio = fund_data.get(StandardColumns.EXPENSE_RATIO, np.nan)
+        if pd.notna(expense_ratio):
+            normalized_score = scorer._normalize_metric(5 - expense_ratio, 0, 5)  # Inverted - lower is better
+            weight = config.METRIC_WEIGHTS['expense']
+            score_components['Expense Efficiency'] = normalized_score * weight * 100
+            component_explanations['Expense Efficiency'] = f"{expense_ratio:.2f}% expense → {normalized_score:.3f} efficiency → {score_components['Expense Efficiency']:.1f} weighted points"
+        else:
+            component_explanations['Expense Efficiency'] = "Missing data - not included in score"
+        
+        # Display component breakdown table
+        st.write("### 📋 Component Scores")
+        
+        breakdown_data = []
+        total_score = 0
+        
+        for component, points in score_components.items():
+            breakdown_data.append({
+                'Component': component,
+                'Points': f"{points:.1f}",
+                'Explanation': component_explanations[component]
+            })
+            total_score += points
+        
+        # Add missing components
+        for component, explanation in component_explanations.items():
+            if component not in score_components:
+                breakdown_data.append({
+                    'Component': component,
+                    'Points': "0.0",
+                    'Explanation': explanation
+                })
+        
+        breakdown_df = pd.DataFrame(breakdown_data)
+        st.dataframe(breakdown_df, use_container_width=True, hide_index=True)
+        
+        st.success(f"**Total Composite Score: {total_score:.1f} points**")
+        
+        # Visual score breakdown chart
+        if score_components:
+            FundDetailComponents._create_score_breakdown_chart(score_components)
+    
+    @staticmethod
+    def _create_score_breakdown_chart(score_components: Dict[str, float]):
+        """Create visual chart showing score component contributions"""
+        
+        st.write("### 📊 Visual Score Breakdown")
+        
+        # Create horizontal bar chart
+        components = list(score_components.keys())
+        scores = list(score_components.values())
+        
+        fig = go.Figure()
+        
+        # Color mapping for different components
+        colors = {
+            'Total Return': '#1f77b4',
+            'Sharpe Ratio': '#ff7f0e', 
+            'Sortino Ratio': '#2ca02c',
+            'AUM Factor': '#d62728',
+            'Expense Efficiency': '#9467bd'
+        }
+        
+        fig.add_trace(go.Bar(
+            y=components,
+            x=scores,
+            orientation='h',
+            marker_color=[colors.get(comp, '#gray') for comp in components],
+            text=[f"{score:.1f}" for score in scores],
+            textposition='auto',
+        ))
+        
+        fig.update_layout(
+            title="Score Component Contributions",
+            xaxis_title="Points Contributed",
+            yaxis_title="Score Components",
+            height=400,
+            template="plotly_white"
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+    
+    @staticmethod
+    def _display_tier_analysis(fund_data: pd.Series, df: pd.DataFrame):
+        """Display tier classification analysis and thresholds"""
+        
+        st.subheader("🏆 Tier Classification Analysis")
+        
+        fund_score = fund_data.get(StandardColumns.SCORE, 0)
+        fund_tier = fund_data.get(StandardColumns.TIER, 'N/A')
+        
+        # Calculate tier thresholds from the dataset
+        if StandardColumns.SCORE in df.columns:
+            valid_scores = df[StandardColumns.SCORE].dropna()
+            if len(valid_scores) > 0:
+                tier_1_threshold = valid_scores.quantile(0.75)  # Top 25%
+                tier_2_threshold = valid_scores.quantile(0.50)  # Middle 25%
+                
+                col1, col2 = st.columns([1, 1])
+                
+                with col1:
+                    st.write("**Tier Thresholds:**")
+                    st.write(f"🥇 Tier 1: ≥ {tier_1_threshold:.1f} points (Top 25%)")
+                    st.write(f"🥈 Tier 2: ≥ {tier_2_threshold:.1f} points (Middle 25%)")
+                    st.write(f"🥉 Tier 3: < {tier_2_threshold:.1f} points (Bottom 50%)")
+                
+                with col2:
+                    st.write("**This Fund:**")
+                    st.write(f"**Score: {fund_score:.1f} points**")
+                    st.write(f"**Classification: {fund_tier}**")
+                    
+                    # Explain why fund is in its tier
+                    if fund_score >= tier_1_threshold:
+                        st.success(f"✅ **Tier 1**: Scores {fund_score - tier_1_threshold:.1f} points above Tier 1 threshold")
+                    elif fund_score >= tier_2_threshold:
+                        points_to_tier1 = tier_1_threshold - fund_score
+                        st.info(f"🔸 **Tier 2**: Needs {points_to_tier1:.1f} more points to reach Tier 1")
+                    else:
+                        points_to_tier2 = tier_2_threshold - fund_score
+                        points_to_tier1 = tier_1_threshold - fund_score
+                        st.warning(f"🔹 **Tier 3**: Needs {points_to_tier2:.1f} points for Tier 2, {points_to_tier1:.1f} for Tier 1")
+                
+                # Show percentile rank
+                percentile = (valid_scores <= fund_score).mean() * 100
+                st.info(f"📊 **Percentile Rank**: {percentile:.1f}% (better than {percentile:.1f}% of all funds)")
+    
+    @staticmethod
+    def _display_data_quality_indicators(fund_data: pd.Series):
+        """Display data quality indicators and missing data flags"""
+        
+        st.subheader("🔍 Data Quality Indicators")
+        
+        # Check for missing key data
+        key_columns = [
+            StandardColumns.TOTAL_RETURN,
+            StandardColumns.SHARPE_RATIO, 
+            StandardColumns.SORTINO_RATIO,
+            StandardColumns.VOLATILITY,
+            StandardColumns.AUM,
+            StandardColumns.EXPENSE_RATIO
+        ]
+        
+        quality_issues = []
+        quality_score = 0
+        total_checks = len(key_columns)
+        
+        col1, col2 = st.columns([1, 1])
+        
+        with col1:
+            st.write("**Data Completeness:**")
+            for col in key_columns:
+                value = fund_data.get(col, np.nan)
+                if pd.notna(value) and value != 0:
+                    st.write(f"✅ {col}: Available")
+                    quality_score += 1
+                else:
+                    st.write(f"❌ {col}: Missing/Invalid")
+                    quality_issues.append(col)
+        
+        with col2:
+            completeness_pct = (quality_score / total_checks) * 100
+            st.metric("Data Completeness", f"{completeness_pct:.0f}%")
+            
+            if completeness_pct >= 80:
+                st.success("🟢 Excellent data quality")
+            elif completeness_pct >= 60:
+                st.warning("🟡 Good data quality")  
+            else:
+                st.error("🔴 Limited data quality")
+        
+        if quality_issues:
+            st.info(f"💡 **Missing data impact**: {len(quality_issues)} metrics missing. These components receive neutral scores or are excluded from the composite calculation to ensure fair comparison.")
+    
+    @staticmethod
+    def _display_category_comparison(fund_data: pd.Series, df: pd.DataFrame):
+        """Display category vs fund performance comparison"""
+        
+        st.subheader("📈 Category Performance Comparison")
+        
+        fund_category = fund_data.get('Category', 'Unknown')
+        
+        if fund_category == 'Unknown' or 'Category' not in df.columns:
+            st.info("Category information not available for comparison")
+            return
+        
+        # Filter to same category funds
+        category_funds = df[df['Category'] == fund_category]
+        
+        if len(category_funds) <= 1:
+            st.info(f"Only one fund in '{fund_category}' category - no comparison available")
+            return
+        
+        st.write(f"**Category**: {fund_category} ({len(category_funds)} funds)")
+        
+        # Calculate category statistics
+        metrics_comparison = {}
+        
+        for metric in [StandardColumns.TOTAL_RETURN, StandardColumns.VOLATILITY, StandardColumns.SHARPE_RATIO, StandardColumns.SCORE]:
+            if metric in category_funds.columns:
+                fund_value = fund_data.get(metric, np.nan)
+                category_values = category_funds[metric].dropna()
+                
+                if len(category_values) > 0 and pd.notna(fund_value):
+                    category_mean = category_values.mean()
+                    category_median = category_values.median()
+                    percentile_rank = (category_values <= fund_value).mean() * 100
+                    
+                    metrics_comparison[metric] = {
+                        'fund_value': fund_value,
+                        'category_mean': category_mean,
+                        'category_median': category_median,
+                        'percentile': percentile_rank,
+                        'vs_mean': fund_value - category_mean
+                    }
+        
+        if metrics_comparison:
+            comparison_data = []
+            for metric, stats in metrics_comparison.items():
+                comparison_data.append({
+                    'Metric': metric,
+                    'Fund Value': f"{stats['fund_value']:.2f}",
+                    'Category Avg': f"{stats['category_mean']:.2f}",
+                    'vs Average': f"{stats['vs_mean']:+.2f}",
+                    'Percentile': f"{stats['percentile']:.0f}%"
+                })
+            
+            comparison_df = pd.DataFrame(comparison_data)
+            st.dataframe(comparison_df, use_container_width=True, hide_index=True)
+            
+            # Summary insights
+            strong_metrics = [metric for metric, stats in metrics_comparison.items() if stats['percentile'] >= 75]
+            weak_metrics = [metric for metric, stats in metrics_comparison.items() if stats['percentile'] <= 25]
+            
+            if strong_metrics:
+                st.success(f"💪 **Strengths**: Top quartile in {', '.join(strong_metrics)}")
+            if weak_metrics:
+                st.warning(f"⚠️ **Improvement areas**: Bottom quartile in {', '.join(weak_metrics)}")
+        else:
+            st.info("Insufficient data for category comparison")
