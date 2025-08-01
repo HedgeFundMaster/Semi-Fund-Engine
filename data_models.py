@@ -80,13 +80,21 @@ class ColumnMapping:
     # Performance metric variations
     RETURN_VARIATIONS = [
         'Total Return (%)', 'Total Return', 'Return (%)', 'Return',
-        'Performance (%)', 'Performance', 'Net Return (%)'
+        'Performance (%)', 'Performance', 'Net Return (%)',
+        'Total Return (1Y)', 'Total Return (3Y)', 'Total Return (5Y)',
+        'Annualized 1 Year Total Returns (Monthly)', 'Annualized 3 Year Total Returns (Monthly)', 
+        'Annualized 5 Year Total Returns (Monthly)', 'Year to Date Total Returns (Daily)',
+        'Annualized 3 Year Total Returns (Daily)'
     ]
     
     # Risk metric variations
     VOLATILITY_VARIATIONS = [
         'Volatility (%)', 'Volatility', 'Vol (%)', 'Vol', 'Std Dev (%)',
-        'Standard Deviation (%)', 'Risk (%)'
+        'Standard Deviation (%)', 'Risk (%)',
+        'Std Dev (1Y)', 'Std Dev (3Y)', 'Std Dev (5Y)',
+        'Annualized Standard Deviation of Monthly Returns (3Y Lookback)',
+        'Annualized Standard Deviation of Monthly Returns (1Y Lookback)',
+        'Annualized Standard Deviation of Monthly Returns (5Y Lookback)'
     ]
     
     # AUM variations

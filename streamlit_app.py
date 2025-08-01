@@ -2,20 +2,19 @@
 Semi-Liquid Alternatives Fund Dashboard - Main Application
 
 This is the main orchestration file that coordinates all dashboard functionality
-using the modular architecture.
+using the modular architecture with enhanced institutional-grade UI.
 """
 
 import streamlit as st
 import pandas as pd
-import numpy as np
 import logging
-from typing import Optional, Dict, Any
+from typing import Dict, Any
 
 # Import our custom modules
-from data_models import StandardColumns, validate_dataframe_for_operation
-from error_handler import handle_errors, ValidationHandler, ErrorMessages
+from data_models import StandardColumns
+from error_handler import handle_errors, ValidationHandler
 from data_loader import load_fund_data, load_app_config, refresh_data_cache
-from scoring_engine import score_fund_universe, get_top_performers, get_funds_by_tier
+from scoring_engine import score_fund_universe
 from ui_components import (
     DashboardTheme, HeaderComponents, DataDisplayComponents, 
     ChartComponents, InteractiveComponents, LayoutComponents, FundDetailComponents
@@ -33,7 +32,63 @@ st.set_page_config(
     page_icon="🏦"
 )
 
-# Apply custom styling
+# ─── ENHANCED CUSTOM CSS STYLING ────────────────────────────────────────────
+
+st.markdown("""
+<style>
+    .main-header {
+        padding: 2rem 0;
+        text-align: center;
+        background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        margin: -1rem -1rem 2rem -1rem;
+        border-radius: 10px;
+    }
+    
+    .metric-container {
+        background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+        padding: 1rem;
+        border-radius: 10px;
+        border-left: 4px solid #667eea;
+        margin: 0.5rem 0;
+    }
+    
+    .tier-badge {
+        display: inline-block;
+        padding: 0.25rem 0.75rem;
+        border-radius: 15px;
+        font-weight: bold;
+        font-size: 0.8rem;
+    }
+    
+    .tier-1 { background: #d4edda; color: #155724; }
+    .tier-2 { background: #fff3cd; color: #856404; }
+    .tier-3 { background: #f8d7da; color: #721c24; }
+    
+    .fund-card {
+        background: white;
+        padding: 1rem;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        margin: 0.5rem 0;
+        border-left: 4px solid #667eea;
+    }
+    
+    .score-high { color: #28a745; font-weight: bold; }
+    .score-medium { color: #ffc107; font-weight: bold; }
+    .score-low { color: #dc3545; font-weight: bold; }
+    
+    .phase-banner {
+        background: linear-gradient(90deg, #1e3a8a 0%, #3b82f6 100%); 
+        color: white; 
+        padding: 8px 16px; 
+        border-radius: 8px; 
+        margin: 10px 0;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# Apply additional custom styling from modular components
 DashboardTheme.apply_custom_css()
 
 # ─── APPLICATION STATE MANAGEMENT ───────────────────────────────────────────
@@ -408,11 +463,101 @@ def create_risk_analytics_tab(df: pd.DataFrame):
 
 # ─── MAIN APPLICATION FLOW ──────────────────────────────────────────────────
 
+def create_enhanced_header():
+    """Create enhanced professional header with Phase 3 indicators"""
+    st.markdown("""
+    <div class="main-header">
+        <h1>🏦 Semi-Liquid Alternatives Fund Selection Dashboard</h1>
+        <p>Advanced quantitative analysis and performance scoring for alternative investments</p>
+        <div class="phase-banner">
+            <strong>🚀 Phase 3 - Institutional Analytics Platform</strong> | 
+            Advanced Portfolio Construction & Risk Management
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+def create_professional_sidebar_features(df):
+    """Add enhanced professional features to sidebar"""
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("**🚀 Phase 3 - Enhanced Analytics**")
+    st.sidebar.caption("✨ Advanced scoring, comparisons, and interactive features")
+    
+    # Scoring Methodology Explanation
+    st.sidebar.markdown("---")
+    with st.sidebar.expander("📊 **Scoring Methodology**", expanded=False):
+        st.markdown("### 📈 **Metric Weights**")
+        st.markdown("""
+        **Core Performance:**
+        - 📊 Total Return: **30%**
+        - ⚡ Sharpe Ratio: **25%** 
+        - 🛡️ Sortino Ratio: **20%**
+        
+        **Additional Factors:**
+        - 📈 Category Delta: **10%**
+        - 💰 AUM Scale: **7.5%**
+        - 💸 Expense Efficiency: **7.5%**
+        """)
+        
+        st.markdown("### 🎯 **Tier Classification**")
+        st.markdown("""
+        - **Tier 1**: Top 25% performers
+        - **Tier 2**: Middle 25% performers  
+        - **Tier 3**: Bottom 50% performers
+        """)
+    
+    # Fund Comparison Tool
+    with st.sidebar.expander("🔍 **Fund Comparison Tool**", expanded=False):
+        st.markdown("### Compare Funds Side-by-Side")
+        
+        # Get available funds for comparison
+        available_funds = df['Ticker'].dropna().unique().tolist() if 'Ticker' in df.columns else []
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            fund1 = st.selectbox("Select Fund 1:", ["None"] + available_funds, key="fund1")
+        with col2:
+            fund2 = st.selectbox("Select Fund 2:", ["None"] + available_funds, key="fund2")
+        
+        # Optional third fund
+        fund3 = st.selectbox("Select Fund 3 (Optional):", ["None"] + available_funds, key="fund3")
+        
+        # Display comparison if funds selected
+        selected_funds = [f for f in [fund1, fund2, fund3] if f != "None"]
+        
+        if len(selected_funds) >= 2:
+            st.markdown("**Selected Funds:**")
+            for i, fund in enumerate(selected_funds, 1):
+                fund_data = df[df['Ticker'] == fund].iloc[0] if 'Ticker' in df.columns else None
+                if fund_data is not None:
+                    score = fund_data.get('Score', 0)
+                    tier = fund_data.get('Tier', 'N/A')
+                    st.write(f"{i}. **{fund}** - Score: {score:.2f}, {tier}")
+    
+    # Professional Features
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("### 🎓 Professional Features")
+    
+    # CSV Export
+    if st.sidebar.button("📊 Generate CSV Report", help="Create comprehensive CSV analysis report"):
+        st.sidebar.success("✅ CSV report generated - check main interface")
+        st.session_state.generate_csv = True
+    
+    # Phase 3 Roadmap Preview
+    with st.sidebar.expander("🚀 **Phase 3 Roadmap**", expanded=False):
+        st.markdown("""
+        **📊 Coming Soon:**
+        • Advanced portfolio optimization
+        • Risk factor analysis
+        • Performance attribution
+        • Correlation analysis
+        • Monte Carlo simulations
+        """)
+
 def main():
     """Main application entry point"""
     
-    # Display header
-    HeaderComponents.display_main_header()
+    # Display enhanced header
+    create_enhanced_header()
     
     # Initialize data
     raw_data, scored_data = initialize_dashboard()
@@ -420,6 +565,9 @@ def main():
     if scored_data is None:
         st.error("❌ Dashboard initialization failed")
         st.stop()
+    
+    # Create enhanced sidebar features
+    create_professional_sidebar_features(scored_data)
     
     # Create sidebar filters
     filters = LayoutComponents.create_sidebar_filters(scored_data)
@@ -468,18 +616,29 @@ def main():
     st.sidebar.markdown("---")
     if st.sidebar.button("🔄 Refresh Data"):
         refresh_data_cache()
-        st.experimental_rerun()
+        st.rerun()
     
-    # Main content tabs
+    # Handle CSV export request
+    if st.session_state.get('generate_csv', False):
+        create_csv_export(filtered_data)
+        st.session_state.generate_csv = False
+    
+    # Enhanced Main content tabs with Phase 3 indicators
     tabs = st.tabs([
         "🏆 Fund Rankings",
         "🛡️ Data Quality", 
         "📊 Fund Comparison",
-        "🎯 Portfolio Builder",
-        "⚠️ Risk Analytics"
+        "🎯 Portfolio Builder*",
+        "⚠️ Risk Analytics*"
     ])
     
+    # Add note about Phase 3 features
+    st.caption("* Phase 3 Features - Enhanced versions coming soon")
+    
     with tabs[0]:
+        # Add enhanced metrics display to rankings tab
+        create_enhanced_metrics_display(filtered_data)
+        st.markdown("---")
         create_main_rankings_tab(filtered_data)
     
     with tabs[1]:
@@ -510,15 +669,94 @@ def main():
             # Add option to clear analysis
             if st.button("🔙 Clear Fund Analysis", type="secondary"):
                 del st.session_state.selected_fund_analysis
-                st.experimental_rerun()
+                st.rerun()
     
-    # Footer
+    # Enhanced Professional Footer
     st.markdown("---")
-    st.markdown(
-        "**Semi-Liquid Alternatives Fund Dashboard** | "
-        "Professional fund analysis and portfolio construction tool | "
-        f"Data updated: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M')}"
-    )
+    st.markdown("""
+    <div style="text-align: center; padding: 2rem 0; background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%); border-radius: 10px; margin-top: 2rem;">
+        <h4>🏦 Semi-Liquid Alternatives Fund Dashboard</h4>
+        <p><strong>Phase 3 - Institutional Analytics Platform</strong></p>
+        <p>Professional fund analysis and portfolio construction tool</p>
+        <small>Data updated: """ + pd.Timestamp.now().strftime('%Y-%m-%d %H:%M') + """ | 
+        Built with advanced quantitative analysis framework</small>
+    </div>
+    """, unsafe_allow_html=True)
+
+def create_csv_export(df):
+    """Create and offer CSV export of fund data"""
+    try:
+        csv_buffer = df.to_csv(index=False)
+        
+        st.success("📊 **CSV Report Generated Successfully!**")
+        
+        # Create download button
+        st.download_button(
+            label="📥 Download Fund Analysis CSV",
+            data=csv_buffer,
+            file_name=f"semi_liquid_funds_analysis_{pd.Timestamp.now().strftime('%Y%m%d_%H%M')}.csv",
+            mime="text/csv",
+            help="Download comprehensive fund analysis data"
+        )
+        
+        # Show preview
+        with st.expander("📋 **CSV Preview**", expanded=False):
+            st.dataframe(df.head(10), use_container_width=True)
+            st.caption(f"Showing first 10 rows of {len(df)} total funds")
+            
+    except Exception as e:
+        st.error(f"❌ Error generating CSV: {str(e)}")
+
+def create_enhanced_metrics_display(df):
+    """Create enhanced metric cards with professional styling"""
+    if df is None or df.empty:
+        return
+    
+    # Calculate key metrics
+    total_funds = len(df)
+    tier_dist = df['Tier'].value_counts() if 'Tier' in df.columns else {}
+    avg_score = df['Score'].mean() if 'Score' in df.columns else 0
+    
+    # Create styled metric containers
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.markdown(f"""
+        <div class="metric-container">
+            <h3>📊 Total Funds</h3>
+            <h2>{total_funds}</h2>
+            <small>Quality funds analyzed</small>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col2:
+        tier1_count = tier_dist.get('Tier 1', 0)
+        st.markdown(f"""
+        <div class="metric-container">
+            <h3>🥇 Tier 1 Funds</h3>
+            <h2 class="score-high">{tier1_count}</h2>
+            <small>Top performers</small>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col3:
+        st.markdown(f"""
+        <div class="metric-container">
+            <h3>📈 Avg Score</h3>
+            <h2 class="score-medium">{avg_score:.1f}</h2>
+            <small>Composite performance</small>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col4:
+        data_quality = (1 - df.isnull().sum().sum() / (len(df) * len(df.columns))) * 100
+        st.markdown(f"""
+        <div class="metric-container">
+            <h3>✅ Data Quality</h3>
+            <h2 class="score-high">{data_quality:.0f}%</h2>
+            <small>Completeness score</small>
+        </div>
+        """, unsafe_allow_html=True)
 
 # ─── APPLICATION ENTRY POINT ────────────────────────────────────────────────
 

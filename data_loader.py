@@ -315,32 +315,122 @@ class DataValidator:
 
 # ─── MAIN DATA LOADING INTERFACE ────────────────────────────────────────────
 
+@handle_errors("Failed to load inception group data")
+def load_inception_groups_data(sheet_id: str) -> Optional[pd.DataFrame]:
+    """
+    Load and combine data from all inception period groups (1Y+, 3Y+, 5Y+)
+    
+    Args:
+        sheet_id: Google Sheets ID
+        
+    Returns:
+        Combined DataFrame with all inception groups or None if failed
+    """
+    inception_groups = [
+        ("1Y+ Inception Funds", "1Y+"),
+        ("3Y+ Inception Funds", "3Y+"), 
+        ("5Y+ Inception Funds", "5Y+")
+    ]
+    
+    all_dataframes = []
+    loader = GoogleSheetsLoader(sheet_id)
+    
+    with st.spinner("Loading fund data from inception period groups..."):
+        for sheet_name, group_label in inception_groups:
+            try:
+                df = loader.load_worksheet_data(sheet_name)
+                if df is not None and not df.empty:
+                    # Add inception group identifier
+                    df['Inception Group'] = group_label
+                    all_dataframes.append(df)
+                    st.success(f"✅ Loaded {len(df)} funds from {group_label} group")
+                else:
+                    st.warning(f"⚠️ No data found in {sheet_name}")
+            except Exception as e:
+                st.error(f"❌ Failed to load {sheet_name}: {str(e)}")
+    
+    if not all_dataframes:
+        st.error("❌ No data loaded from any inception group")
+        return None
+    
+    # Combine all dataframes
+    combined_df = pd.concat(all_dataframes, ignore_index=True)
+    
+    # Apply data quality filtering to get proper fund count
+    filtered_df = apply_data_quality_filtering(combined_df)
+    
+    # Validate filtered data
+    validation_result = DataValidator.validate_fund_data(filtered_df)
+    DataValidator.show_validation_summary(validation_result)
+    
+    if validation_result['is_valid']:
+        st.success(f"✅ Successfully processed {len(filtered_df)} quality funds from {len(all_dataframes)} inception groups")
+        return filtered_df
+    
+    return None
+
+def apply_data_quality_filtering(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Apply data quality filtering to remove funds with insufficient data
+    This gets us from ~137 raw funds to ~58 quality funds
+    
+    Args:
+        df: Combined DataFrame with all inception groups
+        
+    Returns:
+        Filtered DataFrame with quality funds only
+    """
+    if df is None or df.empty:
+        return df
+    
+    original_count = len(df)
+    filtered_df = df.copy()
+    
+    # Filter 1: Remove funds with missing or invalid names
+    missing_names = (
+        filtered_df['Fund'].isna() | 
+        (filtered_df['Fund'] == 'None') | 
+        (filtered_df['Fund'] == '') |
+        (filtered_df['Fund'].astype(str).str.strip() == '')
+    )
+    filtered_df = filtered_df[~missing_names].copy()
+    st.info(f"📊 Removed {missing_names.sum()} funds with missing names: {len(filtered_df)} remaining")
+    
+    # Filter 2: Remove funds with missing critical performance data
+    key_metrics = ['Total Return (%)', 'Volatility (%)']
+    for metric in key_metrics:
+        if metric in filtered_df.columns:
+            before_count = len(filtered_df)
+            missing_metric = filtered_df[metric].isna()
+            filtered_df = filtered_df[~missing_metric].copy()
+            removed = before_count - len(filtered_df)
+            if removed > 0:
+                st.info(f"📊 Removed {removed} funds missing {metric}: {len(filtered_df)} remaining")
+    
+    # Summary
+    total_removed = original_count - len(filtered_df)
+    st.success(f"🎯 Data quality filtering: {original_count} → {len(filtered_df)} funds ({total_removed} removed)")
+    
+    if len(filtered_df) >= 50 and len(filtered_df) <= 70:
+        st.success("✅ Fund count is now in the expected range (~58 quality funds)")
+    
+    return filtered_df
+
 @handle_errors("Failed to load fund data")
 def load_fund_data(sheet_id: str, tab_keyword: str = "Fund") -> Optional[pd.DataFrame]:
     """
     Main function to load and validate fund data
+    Uses inception groups for proper 58-fund universe with tiers
     
     Args:
         sheet_id: Google Sheets ID
-        tab_keyword: Keyword to find the worksheet
+        tab_keyword: Keyword to find the worksheet (legacy parameter)
         
     Returns:
         Cleaned and validated DataFrame or None if failed
     """
-    with st.spinner("Loading fund data from Google Sheets..."):
-        loader = GoogleSheetsLoader(sheet_id)
-        df = loader.load_worksheet_data(tab_keyword)
-        
-        if df is not None:
-            # Validate data quality
-            validation_result = DataValidator.validate_fund_data(df)
-            DataValidator.show_validation_summary(validation_result)
-            
-            # Return data even if there are warnings (but not errors)
-            if validation_result['is_valid']:
-                return df
-        
-        return None
+    # Load from inception period groups instead of single sheet
+    return load_inception_groups_data(sheet_id)
 
 @handle_errors("Failed to load configuration")
 def load_app_config() -> Dict[str, Any]:
